@@ -1,0 +1,15 @@
+[project]
+name = "aub-htp"
+version = "0.1.0"
+description = "AUB's Heavy-Tails Package"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "scipy>=1.15.3",
+]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.10.8",
+    "pytest>=9.0.2",
+]
