@@ -1,15 +1,17 @@
 [project]
 name = "aub-htp"
 version = "0.1.0"
-description = "AUB's Heavy-Tails Package"
+description = "AUB's Heavy-Tails Package - PDF generation and ML for heavy-tailed distributions"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "scipy>=1.15.3",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
 ]
 
 [dependency-groups]
 dev = [
-    "matplotlib>=3.10.8",
-    "pytest>=9.0.2",
+    "matplotlib>=3.7.0",
+    "pytest>=7.0.0",
+    "scikit-learn>=1.2.0",
 ]
