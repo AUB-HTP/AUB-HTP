@@ -8,7 +8,3 @@ including PDF generation and machine learning methods.
 # PDF generation
 from .alpha_stable_pdf import generate_alpha_stable_pdf
 
-# Heavy-tailed ML
-from .heavy_tailed_ml import (
-    KMeansHeavyTailed
-)

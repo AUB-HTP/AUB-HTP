@@ -116,7 +116,7 @@ def main():
     ht_kmeans = KMeansHeavyTailed(
         n_clusters=n_clusters,
         alpha=alpha,
-        max_itererations=10000,
+        max_itererations=100,
         convergence_tolerance=1e-6,
     )
     ht_kmeans.fit(X)

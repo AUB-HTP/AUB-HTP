@@ -2,6 +2,7 @@ import numpy as np
 from pathlib import Path
 from scipy.interpolate import RegularGridInterpolator
 from scipy.integrate import quad_vec
+from functools import lru_cache
 
 from .skorohod import skorohod_formula_1, skorohod_formula_3
 from .zolotarev import generate_pdf_zolotarev_1, generate_pdf_NolanS0
@@ -80,6 +81,7 @@ def normalize_inputs(X, alpha, beta, gamma, delta):
     return Z, shift
 
 
+@lru_cache(maxsize=None)
 def load_interpolator(name: str) -> RegularGridInterpolator:
     """
     Load a RegularGridInterpolator from an npz file.
@@ -324,7 +326,7 @@ def alpha_stable_pdf_core(X, alpha, beta, gamma, delta, ):
     return pdf / gamma
 
 
-def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta, pad_left=10, pad_right=10, growth=1.05): # TODO: add random_state
+def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta, pad_left=10, pad_right=10, growth=1.05): 
     """
     Public pdf wrapper with boundary padding and spike cleanup.
     Pipeline:
