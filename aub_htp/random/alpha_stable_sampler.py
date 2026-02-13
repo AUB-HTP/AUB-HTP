@@ -3,19 +3,27 @@ from scipy.special import gamma
 from .spectral_measure_sampler import BaseSpectralMeasureSampler
 
 def sample_alpha_stable_vector(
-    number_of_convergence_terms: int,
     alpha: float,
     spectral_measure: BaseSpectralMeasureSampler,
+    number_of_samples: int,
+    number_of_convergence_terms: int = 100,
 ):
-    x = np.zeros(spectral_measure.dimensions())
-    cumulative_exponential = 0
+    d = spectral_measure.dimensions()
+    x = np.zeros((number_of_samples, d))
+
+    cumulative_exponential = np.zeros(number_of_samples)
 
     for _ in range(number_of_convergence_terms):
-        cumulative_exponential += np.random.exponential(1.0)
-        x += spectral_measure.sample() * cumulative_exponential ** (-1 / alpha)
+        cumulative_exponential += np.random.exponential(scale=1.0, size=number_of_samples)
+
+        spectral_measure_samples = spectral_measure.sample(number_of_samples)
+        weights = cumulative_exponential ** (-1.0 / alpha)
+
+        x += spectral_measure_samples * weights[:, None]
 
     x *= _c(alpha)
     return x
+
 
 def _c(alpha):
     return _kappa(alpha) ** (-1 / alpha)
