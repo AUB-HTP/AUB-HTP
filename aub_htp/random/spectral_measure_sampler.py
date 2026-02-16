@@ -32,7 +32,8 @@ class IsotropicSampler(BaseSpectralMeasureSampler):
     def sample(self, number_of_samples: int) -> np.ndarray:
         X = np.random.normal(size=(number_of_samples, self.number_of_dimensions))
         X /= np.linalg.norm(X, axis=1, keepdims=True)
-        return X * self.gamma # self.__class__.isotropic_scale_correction(self.dimensions(), self.alpha, self.gamma) #TODO: Fix this mess
+        corr= self.__class__.isotropic_scale_correction(self.dimensions(), self.alpha, self.gamma)
+        return corr * X  # I fixed the scaling issue :) ~ Wael
 
     def dimensions(self) -> int:
         return self.number_of_dimensions
@@ -51,19 +52,31 @@ class EllipticSampler(BaseSpectralMeasureSampler):
 
     def __init__(self,
         number_of_dimensions: int,
+        alpha: float,
         sigma: np.ndarray
     ):
+        self.alpha = alpha
         self.number_of_dimensions = number_of_dimensions
         self.sigma = np.asarray(sigma)
 
     def sample(self, number_of_samples: int) -> np.ndarray:
         X = np.random.normal(size=(number_of_samples, self.number_of_dimensions))
         X /= np.linalg.norm(X, axis=1, keepdims=True)
+        corr= self.__class__.isotropic_scale_correction(self.dimensions(), self.alpha, gamma_scale=1)
         L = np.linalg.cholesky(self.sigma)
-        return X @ L.T
+        return corr * X @ L.T
 
     def dimensions(self) -> int:
         return self.number_of_dimensions
+    
+    @staticmethod
+    def isotropic_scale_correction(d, alpha, gamma_scale):
+        m_d_alpha = (
+                gamma((alpha + 1) / 2)
+                * gamma(d / 2)
+                / (np.sqrt(np.pi) * gamma((d + alpha) / 2))
+        )
+        return gamma_scale * (m_d_alpha ** (-1.0 / alpha))
 
 
 class DiscreteSampler(BaseSpectralMeasureSampler):
@@ -134,3 +147,5 @@ class UnivariateSampler(BaseSpectralMeasureSampler):
 
     def dimensions(self) -> int:
         return 1
+    
+

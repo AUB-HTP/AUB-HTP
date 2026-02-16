@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import gamma
-from .spectral_measure_sampler import BaseSpectralMeasureSampler
+from .spectral_measure_sampler import BaseSpectralMeasureSampler,IsotropicSampler
 
 def sample_alpha_stable_vector(
     alpha: float,
