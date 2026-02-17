@@ -109,13 +109,18 @@ class alpha_stable_gen(rv_continuous):
         else:
             raise AssertionError("Unknown parametrization type")
 
+
 class multi_variate_alpha_stable(multi_rv_generic):
     def rvs(self,
         alpha: float,
         spectral_measure_sampler: BaseSpectralMeasureSampler,
-        random_state: None | int | np.random.RandomState | np.random.Generator
+        size: int | None = None,
+        random_state: None | int | np.random.RandomState | np.random.Generator = None,
     ):
         # TODO:
         # 1. figure out what to do with random_state
         # 2. test
-        return sample_alpha_stable_vector(alpha, spectral_measure_sampler, 1)[0]
+        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1)
+        if size is None:
+            samples[0]
+        return samples

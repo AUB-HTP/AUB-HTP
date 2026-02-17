@@ -22,4 +22,5 @@ dev = [
     "notebook>=7.5.3",
     "plotly>=6.5.2",
     "pytest>=7.0.0",
+    "scikit-learn>=1.7.2",
 ]

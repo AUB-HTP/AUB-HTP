@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import sympy as s
 from scipy.stats import levy_stable
 from scipy.special import psi, gammaln
-from spectral_measure_sampler import BaseSpectralMeasureSampler,IsotropicSampler, EllipticSampler, DiscreteSampler, MixedSampler
+from spectral_measure_sampler import BaseSpectralMeasureSampler,IsotropicSampler, EllipticSampler, DiscreteSampler, MixedSampler,CustomSampler, UnivariateSampler
 from alpha_stable_sampler import sample_alpha_stable_vector
 def pdf_cauchy_1d(x, gamma):
     return 1.0 / (math.pi * gamma * (1.0 + (x / gamma) ** 2))
@@ -39,32 +39,75 @@ Sigma1 = np.array([[2, 0.8],
 Sigma2 = np.array([[2, -1],
                    [-1, 2]])  # vertical major axis
 
-alpha = 1
-N = 500
-M = 500000
+sigma3=np.array([[4.36,-0.35,3.96]
+                 ,[-0.35,0.29,-0.2],
+                 [3.96, -0.2, 5.6]])
+alpha = 0.5
+N = 10
+M = 1000000
 d = 2
-gamma=3
-masses1 = np.array([[1, 0], [0, 1], [-1, 0], [0, -1]])
+gamma=1
+masses1 = np.array([[0, 1], [0, -1], [1,0], [-1,0]])
 masses2 = np.array([[1, 1], [-1, 1], [1, -1], [-1, -1]])
-weight = np.array([0.25, 0.25, 0.25, 0.25])
+weight = np.array([1,1,0.1,0.1])
 
+
+'''
 SP1=IsotropicSampler(d,alpha,gamma=gamma)
-
 SP2=EllipticSampler(d,alpha,Sigma1)
 SP3=EllipticSampler(d,alpha,Sigma2)
+SP7=EllipticSampler(d,alpha,sigma3)
 SP4=DiscreteSampler(masses1,weight)
 SP5=DiscreteSampler(masses2,weight)
 spec_measures = [SP4,SP5]
 SP6=MixedSampler(spec_measures,[0.5,0.5])
-X =sample_alpha_stable_vector(alpha,SP2,M,N) 
-'''
+
+def sample_two_arc_points(N):
+    """
+    Returns an (N,2) numpy array of points sampled as follows:
+    - Flip a fair coin (p <= 0.5).
+    - If true:  sample theta ~ Uniform[-pi/4, pi/4]
+    - Else:     sample theta ~ Uniform[pi - pi/4, pi + pi/4]
+    - Return (cos(theta), sin(theta))
+    """
+    # Fair coin for each sample
+    p = np.random.rand(N)
+
+    theta = np.empty(N)
+
+    mask = p <= 0.5
+
+    # First arc
+    theta[mask] = np.random.uniform(
+        -np.pi/4,
+        np.pi/4,
+        size=mask.sum()
+    )
+
+    # Second arc
+    theta[~mask] = np.random.uniform(
+        np.pi - np.pi/4,
+        np.pi + np.pi/4,
+        size=(~mask).sum()
+    )
+
+    x = np.cos(theta)
+    y = np.sin(theta)
+
+    return np.column_stack((x, y))
+
+SP7=CustomSampler(alpha,2,sample_two_arc_points,4)
+SP8=DiscreteSampler(masses1,weight)
+SP9=MixedSampler([SP7,SP8],np.array([1,1]))
+X =sample_alpha_stable_vector(alpha,SP9,M,N) 
+
 h_MC=-np.mean(np.log(pdf_cauchy_nd(X,d,gamma=gamma)))
 h_true=closed_entropy_isotropic_cauchy(d,gamma=gamma)
 
 print("h_MC :", h_MC)
 print("h_true :", h_true)
 print(abs(h_MC-h_true))
-'''
+
 plt.figure(figsize=(5, 5))
 plt.scatter(X[:, 0], X[:, 1], s=0.1, alpha=0.3, color='blue')
 plt.grid(True)
@@ -73,4 +116,42 @@ plt.xlim((-400 , 400))
 plt.ylim((-400 , 400 ))
 plt.title("Isotropic 2D Cauchy (LePage)")
 plt.show()
+'''
 
+alpha=1.5
+beta=0
+gamma=3
+delta=np.zeros(1)
+delta[0]=5000
+m=500000
+Spectral_Measure=UnivariateSampler(alpha=alpha,beta=beta,gamma=gamma)
+X=sample_alpha_stable_vector(alpha,Spectral_Measure,m,delta)
+
+
+
+# --- Truncate range ---
+xmin=-10000+delta[0]
+xmax =10000+delta[0]
+X_trunc = X[(X >= xmin) & (X <= xmax)]
+
+# --- Histogram ---
+counts, bins, _=plt.hist(X_trunc, bins=2000, density=True, color="#00e5ff",edgecolor="black")
+# --- Grid for pdf ---
+bin_centers=(bins[:-1]+bins[1:])/2
+
+# SciPy parameterization:
+# levy_stable(alpha, beta, loc=delta, scale=gamma)
+pdf_vals = levy_stable.pdf(bin_centers, alpha, beta, loc=delta, scale=gamma)
+
+# --- Renormalization for truncation ---
+F_xmax = levy_stable.cdf(xmax, alpha, beta, loc=delta, scale=gamma)
+F_xmin = levy_stable.cdf(xmin, alpha, beta, loc=delta, scale=gamma)
+
+normalization = F_xmax - F_xmin
+pdf_truncated = pdf_vals / normalization
+
+# --- Overlay ---
+plt.plot(bin_centers, pdf_truncated, 'black', lw=2, )
+plt.xlim(xmin, xmax)
+plt.legend()
+plt.show()
