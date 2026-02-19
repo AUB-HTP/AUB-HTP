@@ -4,11 +4,52 @@ import matplotlib.pyplot as plt
 import sympy as s
 from scipy.stats import levy_stable
 from scipy.special import psi, gammaln
-from spectral_measure_sampler import BaseSpectralMeasureSampler,IsotropicSampler, EllipticSampler, DiscreteSampler, MixedSampler,CustomSampler, UnivariateSampler
-from alpha_stable_sampler import sample_alpha_stable_vector
+from aub_htp.random import BaseSpectralMeasureSampler, IsotropicSampler, EllipticSampler, DiscreteSampler, MixedSampler, UnivariateSampler
+from aub_htp import sample_alpha_stable_vector
+import logging
+
 def pdf_cauchy_1d(x, gamma):
     return 1.0 / (math.pi * gamma * (1.0 + (x / gamma) ** 2))
 
+class CustomSampler(BaseSpectralMeasureSampler):
+
+    def __init__(self,
+                 alpha: float,
+                 dimension: int,
+                 given_sampler,
+                 total_mass_of_sphere: float | None = None):
+
+        self._dimension = dimension
+        self._given_sampler = given_sampler
+        self._alpha = alpha
+        if self._alpha >= 1:
+            logging.warning(
+                "α ≥ 1, If ∫_{S^{d−1}} s Λ(ds) != 0, then the resulting computations are not correct."
+            )
+        if total_mass_of_sphere is None:
+            logging.warning(
+                "The total mass of the unit sphere was not provided, so the computations are carried out assuming the total mass of the sphere is 1"
+            )
+            self._mass = 1.0
+        else:
+            self._mass = float(total_mass_of_sphere)
+
+    def sample(self, number_of_samples: int) -> np.ndarray:
+        samples = self._given_sampler(number_of_samples)
+
+        if samples.shape != (number_of_samples, self._dimension):
+            raise ValueError(
+                f"Sampler must return shape "
+                f"({number_of_samples}, {self._dimension})"
+            )
+
+        return samples
+
+    def dimensions(self) -> int:
+        return self._dimension
+
+    def mass(self) -> float:
+        return self._mass
 
 def pdf_independent_cauchy_2d(x, gamma1, gamma2):
     x = np.atleast_2d(x)
