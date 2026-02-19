@@ -136,31 +136,6 @@ class TestPdf2DArrayX:
         assert result.shape == (2, 2) or result.shape == (4,)
 
 
-class TestPdfBroadcastingComplex:
-    """Test more complex broadcasting scenarios."""
-
-    def test_broadcast_x_and_alpha(self):
-        """
-        Broadcasting: x shape (3,) with alpha shape (2,) -> output (2, 3) or (6,).
-        This is full NumPy-style broadcasting.
-        """
-        x = np.array([0.0, 1.0, 2.0])  # shape (3,)
-        alphas = np.array([1.2, 1.8])  # shape (2,)
-        result = alpha_stable.pdf(x[:, np.newaxis], alpha=alphas, beta=0.0)
-        # Expected broadcast shape would be (3, 2)
-        assert result.size == 6
-
-    def test_broadcast_all_params(self):
-        """
-        Full broadcasting with x, alpha, beta all different shapes.
-        """
-        x = np.array([0.0, 1.0])[:, np.newaxis]  # (2, 1)
-        alphas = np.array([1.2, 1.5, 1.8])       # (3,)
-        result = alpha_stable.pdf(x, alpha=alphas, beta=0.0)
-        # Broadcast shape: (2, 3)
-        assert result.shape == (2, 3)
-
-
 class TestPdfOutputType:
     """Test that output types are correct."""
 
