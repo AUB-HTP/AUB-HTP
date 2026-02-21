@@ -130,7 +130,8 @@ class alpha_stable_gen(rv_continuous):
                 alpha_,
                 sampler,
                 number_of_samples_for_this_pair,
-                shift_vector=shift_
+                shift_,
+                random_state = random_state,
             )
 
             # Assign samples to all rows that share this (alpha, beta) pair
@@ -150,7 +151,6 @@ class alpha_stable_gen(rv_continuous):
         (alpha, beta), delta, gamma, size = self._parse_args_rvs(*args, **kwds)
 
         return self._vectorized_rvs(alpha, beta, gamma, delta, self.parameterization, size=size, random_state=random_state)
-
 
 
     def _get_shift_term(self, alpha: float, beta: float, gamma: float, delta: float, parameterization: Literal["S0", "S1"] | None = None) -> float:
@@ -178,7 +178,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         if spectral_measure_sampler == "standard_isotropic_2d":
             spectral_measure_sampler = IsotropicSampler(2, alpha, 1)
         assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
-        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, number_of_convergence_terms)
+        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, number_of_convergence_terms, random_state = random_state)
         if size is None:
             return samples[0]
         return samples

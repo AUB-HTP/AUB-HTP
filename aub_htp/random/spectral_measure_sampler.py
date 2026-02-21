@@ -2,6 +2,7 @@ import numpy as np
 from scipy.special import gamma
 import logging
 from abc import abstractmethod, ABC
+from .util import get_random_state_generator
 
 class BaseSpectralMeasureSampler(ABC):
     '''
@@ -15,7 +16,7 @@ class BaseSpectralMeasureSampler(ABC):
     '''
 
     @abstractmethod
-    def sample(self, number_of_samples: int) -> np.ndarray:
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         pass
 
     @abstractmethod
@@ -39,8 +40,9 @@ class IsotropicSampler(BaseSpectralMeasureSampler):
         self.gamma = gamma
         self._mass = 1
 
-    def sample(self, number_of_samples: int) -> np.ndarray:
-        X = np.random.normal(size=(number_of_samples, self.number_of_dimensions))
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+        random_state = get_random_state_generator(random_state)
+        X = random_state.normal(size=(number_of_samples, self.number_of_dimensions))
         X /= np.linalg.norm(X, axis=1, keepdims=True)
         corr = isotropic_scale_correction(self.dimensions(), self.alpha, self.gamma)
         return corr * X
@@ -57,16 +59,18 @@ class EllipticSampler(BaseSpectralMeasureSampler):
     def __init__(self,
         number_of_dimensions: int,
         alpha: float,
-        sigma: np.ndarray
+        sigma: np.ndarray,
+        mass: float | None = None,
     ):
         self.alpha = alpha
         self.number_of_dimensions = number_of_dimensions
         self.alpha = alpha
         self.sigma = np.asarray(sigma)
-        self._mass = self._estimate_mass()
+        self._mass = mass or self._estimate_mass()
 
-    def sample(self, number_of_samples: int) -> np.ndarray:
-        X = np.random.normal(size=(number_of_samples, self.number_of_dimensions))
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+        random_state = get_random_state_generator(random_state)
+        X = random_state.normal(size=(number_of_samples, self.number_of_dimensions))
         X /= np.linalg.norm(X, axis=1, keepdims=True)
         corr = isotropic_scale_correction(self.dimensions(), self.alpha, gamma_scale=1)
         L = np.linalg.cholesky(self.sigma)
@@ -79,6 +83,7 @@ class EllipticSampler(BaseSpectralMeasureSampler):
         return float(self._mass)
 
     def _estimate_mass(self, number_of_samples_taken_for_accuracy: int = 100000):
+        logging.warning("EllipticSampler(... mass = None), mass was not set. Using estimated mass instead.")
         U = np.random.normal(size=(number_of_samples_taken_for_accuracy, self.dimensions()))
         U /= np.linalg.norm(U, axis=1, keepdims=True)
         L = np.linalg.cholesky(self.sigma)
@@ -98,8 +103,9 @@ class DiscreteSampler(BaseSpectralMeasureSampler):
         self.number_of_dimensions = self.positions.shape[1]
         self._mass = self.weights.sum()
 
-    def sample(self, number_of_samples: int) -> np.ndarray:
-        indices = np.random.choice(len(self.weights), size=number_of_samples, p=self.weights / self.weights.sum())
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+        random_state = get_random_state_generator(random_state)
+        indices = random_state.choice(len(self.weights), size=number_of_samples, p=self.weights / self.weights.sum())
         return self.positions[indices]
 
     def dimensions(self) -> int:
@@ -124,14 +130,15 @@ class MixedSampler(BaseSpectralMeasureSampler):
         self.weights = np.asarray(weights)
         self._mass = self._calculate_mass()
 
-    def sample(self, number_of_samples: int) -> np.ndarray:
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+        random_state = get_random_state_generator(random_state)
         weights = self.weights / self.weights.sum()
-        indices = np.random.choice(len(weights), size=number_of_samples, p=weights)
+        indices = random_state.choice(len(weights), size=number_of_samples, p=weights)
         samples = []
         for i in range(len(weights)):
             count = np.sum(indices == i)
             if count > 0:
-                samples.append(self.spectral_measures[i].sample(count))
+                samples.append(self.spectral_measures[i].sample(count, random_state))
         return np.vstack(samples)
 
     def dimensions(self) -> int:
@@ -160,10 +167,11 @@ class UnivariateSampler(BaseSpectralMeasureSampler):
         if self.alpha >= 1:
             assert self.beta == 0, "For alpha >= 1, beta is 0"
 
-    def sample(self, number_of_samples: int) -> np.ndarray:
+    def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+        random_state = get_random_state_generator(random_state)
         p_plus = (1.0 + self.beta) / 2.0
         signs = np.where(
-            np.random.rand(number_of_samples) <= p_plus,
+            random_state.rand(number_of_samples) <= p_plus,
             1.0,
             -1.0
         ).reshape(-1, 1) # reshape to (n, 1) since we expect vectors

@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.special import gamma
 from .spectral_measure_sampler import BaseSpectralMeasureSampler
+from .util import get_random_state_generator
 import logging
 
 def sample_alpha_stable_vector(
@@ -9,7 +10,9 @@ def sample_alpha_stable_vector(
     number_of_samples: int = 1,
     shift_vector: np.ndarray = 0,
     number_of_convergence_terms: int | None = None,
+    random_state: None | int | np.random.RandomState | np.random.Generator = None
 ):
+    random_state = get_random_state_generator(random_state)
     dimensions = spectral_measure.dimensions()
     shift_vector = np.broadcast_to(shift_vector, dimensions)
 
@@ -20,9 +23,9 @@ def sample_alpha_stable_vector(
     cumulative_exponential = np.zeros(number_of_samples)
 
     for _ in range(number_of_convergence_terms):
-        cumulative_exponential += np.random.exponential(scale=1.0, size=number_of_samples)
+        cumulative_exponential += random_state.exponential(scale=1.0, size=number_of_samples)
 
-        spectral_measure_samples = spectral_measure.sample(number_of_samples)
+        spectral_measure_samples = spectral_measure.sample(number_of_samples, random_state)
         weights = cumulative_exponential ** (-1.0 / alpha)
 
         x += spectral_measure_samples * weights[:, None]
