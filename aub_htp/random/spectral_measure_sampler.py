@@ -100,6 +100,8 @@ class DiscreteSampler(BaseSpectralMeasureSampler):
         self.positions = np.asarray(positions)
         self.weights = np.asarray(weights)
         assert self.positions.shape[0] == self.weights.shape[0] and self.positions.shape[0] > 0
+        if len(self.positions.shape) < 2:
+            self.positions = self.positions.reshape(-1, 1)
         self.number_of_dimensions = self.positions.shape[1]
         self._mass = self.weights.sum()
 

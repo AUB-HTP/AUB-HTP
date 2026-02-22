@@ -194,6 +194,9 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         if spectral_measure_sampler == "1x2_elliptic_2d":
             return EllipticSampler(2, alpha, sigma=[[1, 0], [0, 2]])
 
+        if spectral_measure_sampler == "1x2x4_elliptic_3d":
+            return EllipticSampler(3, alpha, sigma=[[1, 0, 0], [0, 2, 0], [0, 0, 4]])
+
         if spectral_measure_sampler == "coin_flip_discrete":
             return DiscreteSampler([-1, 1], [0.5, 0.5])
 
