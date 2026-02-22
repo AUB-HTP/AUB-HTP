@@ -94,6 +94,7 @@ class EllipticSampler(BaseSpectralMeasureSampler):
 class DiscreteSampler(BaseSpectralMeasureSampler):
 
     def __init__(self,
+        alpha: float,
         positions: np.ndarray,
         weights: np.ndarray
     ):
@@ -104,6 +105,8 @@ class DiscreteSampler(BaseSpectralMeasureSampler):
             self.positions = self.positions.reshape(-1, 1)
         self.number_of_dimensions = self.positions.shape[1]
         self._mass = self.weights.sum()
+        if alpha >= 1:
+            assert np.all((self.positions*self.weights[:, None]).sum(axis = 0) == 0), "when alpha >= 1, the weighted mean of the positions should be 0."
 
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         random_state = get_random_state_generator(random_state)

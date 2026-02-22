@@ -198,7 +198,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             return EllipticSampler(3, alpha, sigma=[[1, 0, 0], [0, 2, 0], [0, 0, 4]])
 
         if spectral_measure_sampler == "coin_flip_discrete":
-            return DiscreteSampler([-1, 1], [0.5, 0.5])
+            return DiscreteSampler(alpha, [-1, 1], [0.5, 0.5])
 
         raise ValueError("Unknown spectral measure sampler")
 

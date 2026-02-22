@@ -107,7 +107,7 @@ alpha = 0.6
 isotropic = IsotropicSampler(number_of_dimensions = 2 , alpha = alpha, gamma = 2)
 elliptic = EllipticSampler(number_of_dimensions = 2, alpha = alpha, sigma = [[10, 2], 
                                                                              [2, 50]])
-discrete = DiscreteSampler(positions = [[0, 1], [-1, 0]],  weights = [0.2, 0.8])
+discrete = DiscreteSampler(alpha = alpha, positions = [[0, 1], [-1, 0]],  weights = [0.2, 0.8])
 
 mixed = MixedSampler(spectral_measures = [isotropic, elliptic, discrete], weights = [0.4, 0.4, 0.2])
 
@@ -118,8 +118,12 @@ print(samples)
 
 #### Custom Spectral Measures
 
-You can also extend the standard library collection by extending the base class `BaseSpectralMeasureSampler`.
+You can also extend the standard library collection by extending the base class `BaseSpectralMeasureSampler`. 
 
+**Important Note**: When sampling an alpha stable vector against your custom defined spectral measure with $alpha \ge 1$, your custom spectral measure $\Lambda$ has to uphold the following property:
+$$\int_{\mathbb{S}^{d-1}}s\Lambda(ds)=0$$
+
+Example: Butterfly Spectral Measure Sampler
 ```python
 import aub_htp as ht
 from aub_htp.random import BaseSpectralMeasureSampler
