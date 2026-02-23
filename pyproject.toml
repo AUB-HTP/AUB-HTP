@@ -1,6 +1,6 @@
 [project]
 name = "aub-htp"
-version = "0.1.0"
+version = "1.0.0"
 description = "AUB's Heavy-Tails Package - PDF generation and ML for heavy-tailed distributions"
 readme = "README.md"
 requires-python = ">=3.10"
