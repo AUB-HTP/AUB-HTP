@@ -9,12 +9,8 @@ As of date, this repository encompasses a **scipy-compatible** frontend to **gen
 ```commandline
 pip install aub-htp
 ```
-or
-```commandline
-git clone https://github.com/AUB-HTP/AUB-HTP
-cd AUB-HTP
-pip install -e .
-```
+
+For alternative installation methods (uv, conda, poetry), see [docs/install.md](docs/install.md).
 
 ### Univariate Alpha Stable Distributions
 
