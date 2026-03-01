@@ -1,3 +1,4 @@
+from ast import Not
 import numpy as np
 import numpy.typing as npt
 from typing import Literal
@@ -8,7 +9,9 @@ from scipy.stats._distn_infrastructure import _ShapeInfo
 
 from .pdf import generate_alpha_stable_pdf
 from .random import sample_alpha_stable_vector, IsotropicSampler, UnivariateSampler, EllipticSampler, DiscreteSampler, BaseSpectralMeasureSampler
-
+from .random.cms_univariate_sampler import sample_cms
+from .random.alpha_stable_sampler import estimate_number_of_convergence_terms
+import logging
 
 class alpha_stable_gen(rv_continuous):
     _parameterization: Literal["S1", "S0"] = "S1"
@@ -125,19 +128,32 @@ class alpha_stable_gen(rv_continuous):
             mask = inverse == idx
             number_of_samples_for_this_pair = mask.sum()
 
-            sampler = UnivariateSampler(alpha_, beta_, gamma=gamma_)
-            samples = sample_alpha_stable_vector(
-                alpha_,
-                sampler,
-                number_of_samples_for_this_pair,
-                shift_,
-                random_state = random_state,
-            )
+            samples = alpha_stable_gen._single_valued_rvs(alpha_, beta_, gamma_, shift_, number_of_samples_for_this_pair, random_state)
 
             # Assign samples to all rows that share this (alpha, beta) pair
             out[(inverse == idx)] = samples
 
         return out.reshape(size)
+    
+
+    @staticmethod
+    def _single_valued_rvs(alpha_, beta_, gamma_, shift_, size, random_state):
+        if alpha_ >= 1 and beta_ != 0 or estimate_number_of_convergence_terms(0.01, alpha_, gamma_**alpha_) >= 50000:
+            logging.debug(f"Using CMS sampler for alpha = {alpha_}, beta = {beta_}")
+            samples = sample_cms(alpha_, beta_, size, random_state)
+            return samples * gamma_ + shift_
+        else:
+            logging.debug(f"Using Univariate sampler for alpha = {alpha_}, beta = {beta_}")
+            sampler = UnivariateSampler(alpha_, beta_, gamma=gamma_)
+            samples = sample_alpha_stable_vector(
+                alpha_,
+                sampler,
+                size,
+                shift_,
+                random_state = random_state,
+            )
+        return samples
+
 
     def _rvs(self, alpha, beta, size=None, random_state=None):
         return self._vectorized_rvs(alpha, beta, 1, 0, size = size, random_state = random_state)
