@@ -22,6 +22,7 @@ class TestAlphaPowerCorrectness:
             (1.0, 4),
             (1.2, 10.),
             (1.5, -20.),
+            (1.5, 20.),
             (2., 40.),
         ]    
     )
