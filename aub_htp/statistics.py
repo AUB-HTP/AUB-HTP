@@ -46,12 +46,28 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
     _, dimensions = data.shape
     entropy = _isotropic_entropy(dimensions, alpha)
 
+    def objective_function(power: np.ndarray) -> float:
+        power = float(np.asarray(power).reshape(-1)[0])
+        if power <= 0:
+            return np.inf
+        log_pdf = -np.log(_isotropic_pdf(data / power, alpha))
+        expected_log_pdf = np.mean(log_pdf)
+        return float((expected_log_pdf - entropy) ** 2)
+
+    result = minimize(
+        objective_function,
+        x0=np.array([1.0]),
+        bounds=[(1e-12, None)],
+    )
+    return float(result.x[0])
+'''
     def objective_function(power: float) -> float:
         log_pdf = -np.log(_isotropic_pdf(data / power, alpha))
         expected_log_pdf = np.mean(log_pdf)
         return (expected_log_pdf - entropy)**2
 
     return minimize(objective_function, x0 = 1.0).x
+    '''
 
 
 def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
