@@ -42,7 +42,8 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
     data = np.asarray(data)
     if data.ndim == 1:
         data = data.reshape(-1, 1)
-    
+    elif data.ndim != 2: #Added
+        raise ValueError("data must be 1-D or 2-D")
     _, dimensions = data.shape
     entropy = _isotropic_entropy(dimensions, alpha)
 

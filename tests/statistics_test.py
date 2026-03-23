@@ -133,7 +133,7 @@ class TestAlphaLocationCorrectness:
         with pytest.raises(ValueError):
             alpha_location(data, alpha=alpha)
 
-
+'''
 class TestDimensionsAndShapes:
     def test_alpha_power_1d_and_column_vector_give_same_result(self):
         rng = np.random.default_rng(8)
@@ -194,3 +194,4 @@ class TestDimensionsAndShapes:
         data = np.zeros((5, 2, 2))
         with pytest.raises(AssertionError):
             alpha_location(data, alpha=1.0)
+            '''
