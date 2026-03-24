@@ -1,7 +1,8 @@
+from aub_htp import __version__ as package_version
 project = "AUB-HTP"
 copyright = '2026, AUB-HTP'
 author = 'Ahmad El Hajj'
-release = '1.0.7'
+release = package_version
 root_doc = "index"
 
 extensions = [

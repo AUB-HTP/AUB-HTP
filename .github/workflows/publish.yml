@@ -8,20 +8,7 @@ on:
 jobs:
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
-    if: github.event.base_ref == 'refs/heads/main' || github.ref_type == 'tag'
-    
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Install AUB-HTP
-        run: uv sync --all-extras --dev
-
-      - name: Run tests
-        run: uv run pytest tests
+    uses: ./.github/workflows/run-tests.yml
 
   build:
     name: Build Distribution
