@@ -184,6 +184,9 @@ class alpha_stable_gen(rv_continuous):
 
 
 class multivariate_alpha_stable_gen(multi_rv_generic):
+    """
+    Multivariate alpha stable distribution generator.
+    """
     def rvs(self,
         alpha: float,
         spectral_measure_sampler: BaseSpectralMeasureSampler | Literal["standard_isotropic_2d", "standard_isotropic_3d", "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"] = "standard_isotropic_2d",
@@ -191,6 +194,32 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         size: int | None = None,
         random_state: None | int | np.random.RandomState | np.random.Generator = None,
     ):
+        """
+        Sample from a multivariate alpha stable distribution.
+        
+        Parameters
+        ----------
+        alpha : float
+            The alpha parameter of the alpha stable distribution.
+        spectral_measure_sampler : BaseSpectralMeasureSampler or str
+            The spectral measure sampler to use.
+        shift : np.ndarray
+            The shift vector to apply to the samples.
+        size : int or tuple of ints, optional
+            Defines the shape of the returned array. Default is 1.
+        random_state : int or None, optional
+            Random state to use for the random number generator.
+
+        Returns
+        -------
+        samples : ndarray
+            Samples from the multivariate alpha stable distribution.
+
+        Raises
+        ------
+        ValueError
+            If the spectral measure sampler is not supported.
+        """
         spectral_measure_sampler = self._check_spectral_measure_sampler(alpha, spectral_measure_sampler)
         assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
         samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, random_state = random_state)

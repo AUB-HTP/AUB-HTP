@@ -21,9 +21,16 @@ def r_alpha_score(y, y_pred, *, alpha: float) -> float:
 
 
 class AlphaStableLinearRegressor(RegressorMixin, BaseEstimator):
-    """
-    Alpha-stable linear regression:
-        argmin_{w,b} alpha_power(y - (x @ w.T + b)) ** alpha
+    r"""
+    Scikit-learn compatible Alpha-stable linear regression.
+
+    Given :math:`\textbf{x}` and :math:`\textbf{y}` as training data, where :math:`\textbf{x}` 
+    is a matrix of shape (n_samples, n_features) and :math:`\textbf{y}` is a matrix 
+    of shape (n_samples, n_targets), the objective is to find the weights 
+    :math:`\textbf{w}` and bias :math:`b` that minimizes the loss function:
+
+    .. math::
+        \mathrm{arg\,min}_{\mathbf{w}, b} P_\alpha(y - (\mathbf{x}\mathbf{w}^T + b))^\alpha
     """
 
     def __init__(
