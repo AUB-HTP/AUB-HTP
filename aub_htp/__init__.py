@@ -29,6 +29,8 @@ from .statistics import (
 from .machine_learning import (
     AlphaStableLinearRegressor,
     AlphaStableKMeans,
+    HeavyTailedCovariance,
+    HeavyTailedPCA,
     l_alpha_loss,
     r_alpha_score,
 )
@@ -64,6 +66,8 @@ __all__ = [
     # Machine Learning
     "AlphaStableLinearRegressor",
     "AlphaStableKMeans",
+    "HeavyTailedCovariance",
+    "HeavyTailedPCA",
     "l_alpha_loss",
     "r_alpha_score",
 

@@ -6,15 +6,14 @@ from scipy.optimize import minimize
 
 from ..statistics import alpha_power, alpha_location
 
-# TODO: check with professors if these definitions are good.
-#    - L^alpha loss
-#    - R^alpha score
 
 def l_alpha_loss(y, y_pred, *, alpha: float):
-    return alpha_power(y - y_pred, alpha) ** alpha 
+    # TODO: Document the descrepancy with paper.
+    return alpha_power(y - y_pred, alpha) ** 2 
 
 
 def r_alpha_score(y, y_pred, *, alpha: float) -> float:
+    # TODO: Pending more analysis on this.
     y_location = np.broadcast_to(alpha_location(y, alpha), y.shape)
     return (1 - l_alpha_loss(y, y_pred, alpha=alpha)
               / l_alpha_loss(y, y_location, alpha=alpha))
