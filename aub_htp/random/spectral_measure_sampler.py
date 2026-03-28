@@ -6,26 +6,70 @@ from .util import get_random_state_generator
 
 class BaseSpectralMeasureSampler(ABC):
     '''
-    Spectral Measure Sampler is an interface which defines:
-        - self.sample(number_of_samples: int) sampling algorithm (self.sample)
-        - self.dimensions() the number of dimensions of the spectral measure
-        - self.mass() the number of dimensions of the spectral measure
+    Spectral Measure Sampler is an interface to define the sampling algorithm for a spectral measure.
+    The underlying mathematical spectral measure :math:`\Lambda` has to uphold the following property:
+    
+    .. math::
+        \int_{\mathbb{S}^{d-1}}s\Lambda(ds)=0
 
-    The underlying mathematical spectral measure being sampled against :math:`\Lambda` has to uphold the following property:
-        :math:`\int_{\mathbb{S}^{d-1}}s\Lambda(ds)=0`
+    To create a custom spectral measure sampler, you need to inherit from this class and implement the following methods:  
+    
+    - :meth:`sample`  
+    
+    - :meth:`dimensions`  
+    
+    - :meth:`mass`  
+
+    Example:
+    ::
+        class CustomSpectralMeasureSampler(BaseSpectralMeasureSampler):
+            def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
+                random_state = get_random_state_generator(random_state)
+                return random_state.rand(number_of_samples, self.dimensions())
+            def dimensions(self) -> int:
+                return 2
+            def mass(self) -> float:
+                return 1.0
     '''
 
     @abstractmethod
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
-        pass
+        """Sampling algorithm for the spectral measure sampler.
+
+        Parameters
+        ----------
+        number_of_samples : int
+            The number of samples to draw from the spectral measure.
+        random_state : None | int | np.random.RandomState | np.random.Generator, optional
+            The random state to use for the sampling. You are encouraged to use :func:`aub_htp.random.get_random_state_generator` 
+            to get a random state generator as such:
+            :code:`random_state = get_random_state_generator(random_state)`
+        
+        Returns
+        -------
+        samples : np.ndarray
+            The samples from the spectral measure.
+        """
 
     @abstractmethod
     def dimensions(self) -> int:
-        pass
+        """
+        Number of dimensions of the vector space of the spectral measure.
+
+        Returns
+        -------
+        dimensions : int
+        """
 
     @abstractmethod
     def mass(self) -> float:
-        pass
+        """
+        Mass of the spectral measure.
+
+        Returns
+        -------
+        mass : float
+        """
 
 
 class IsotropicSampler(BaseSpectralMeasureSampler):
