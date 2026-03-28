@@ -11,11 +11,16 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
     if dimensions == 1:
         return alpha_stable.pdf(data.ravel(), alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
     else:
-        if alpha != 1:
-            raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1")
         squared_norm = np.sum(data ** 2, axis=1)
-        coefficient = special.gamma((dimensions + 1) / 2) / (np.pi ** ((dimensions + 1) / 2))
-        return coefficient * (1 + squared_norm) ** (-(dimensions + 1) / 2)
+        if alpha == 2:
+            # Normal distribution: N(0, I)
+            return (2 * np.pi) ** (-dimensions / 2) * np.exp(-squared_norm / 2)
+        elif alpha == 1:
+            # Cauchy distribution
+            coefficient = special.gamma((dimensions + 1) / 2) / (np.pi ** ((dimensions + 1) / 2))
+            return coefficient * (1 + squared_norm) ** (-(dimensions + 1) / 2)
+        else:
+            raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1 (Cauchy) or alpha = 2 (Normal)")
 
 
 @lru_cache(maxsize=None)
@@ -23,14 +28,18 @@ def isotropic_entropy(dimensions: int, alpha: float) -> float:
     if dimensions == 1:
         return alpha_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
     else:
-        if alpha != 1:
-            raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1")
-        
-        return (
-            np.log(np.pi ** ((dimensions + 1) / 2) / special.gamma((dimensions + 1) / 2))
-            + ((dimensions + 1) / 2)
-            * (special.digamma((dimensions + 1) / 2) - special.digamma(0.5))
-        )
+        if alpha == 2:
+            # Normal distribution: N(0, I)
+            return 0.5 * dimensions * np.log(2 * np.pi * np.e)
+        elif alpha == 1:
+            # Cauchy distribution
+            return (
+                np.log(np.pi ** ((dimensions + 1) / 2) / special.gamma((dimensions + 1) / 2))
+                + ((dimensions + 1) / 2)
+                * (special.digamma((dimensions + 1) / 2) - special.digamma(0.5))
+            )
+        else:
+            raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1 (Cauchy) or alpha = 2 (Normal)")
 
 
 def alpha_power(data: np.ndarray, alpha: float) -> float:
@@ -56,6 +65,7 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
             "ftol": float(1e-8),
         }
     ).x.item()
+
 
 
 def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
