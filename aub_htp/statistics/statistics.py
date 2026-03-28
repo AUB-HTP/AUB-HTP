@@ -37,13 +37,13 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
     data = np.asarray(data) 
     if data.ndim == 1:
         data = data.reshape(-1, 1)
-    elif data.ndim != 2: #Added
-        raise ValueError("data must be 1-D or 2-D")
     _, dimensions = data.shape
     entropy = isotropic_entropy(dimensions, alpha)
 
     def objective_function(power: float) -> float:
-        log_pdf = -np.log(_isotropic_pdf(data / power, alpha))
+        if power <= 0:
+            return np.inf
+        log_pdf = -np.log(isotropic_pdf(data / power, alpha))
         expected_log_pdf = np.mean(log_pdf)
         return (expected_log_pdf - entropy)**2
 
