@@ -18,7 +18,10 @@ where = ["."]
 include = ["aub_htp*"]
 
 [tool.setuptools.package-data]
-aub_htp = ["pdf/data/*.npz"]
+aub_htp = [
+    "pdf/data/*.npz",
+    "machine_learning/_shape/data/*.npz",
+]
 
 [project.urls]
 Homepage = "https://github.com/AUB-HTP/AUB-HTP"
