@@ -350,7 +350,7 @@ def generate_alpha_stable_pdf_wrap(X, alpha, beta, gamma, delta, pad_left=10, pa
     return dens
 
 @lru_cache(maxsize=128)
-def get_interpolator(alpha, beta):
+def get_alpha_stable_pdf_interpolator(alpha, beta):
     x = np.linspace(-1, 1, 10000) 
     x = 50 * np.sign(x) * (np.abs(x) ** 10) #TODO: ask profs if this range is good
     y = generate_alpha_stable_pdf_wrap(x, alpha, beta, 1, 0)
@@ -358,13 +358,13 @@ def get_interpolator(alpha, beta):
     return interp1d(
         x,
         y,
-        kind='cubic',
+        kind='linear',
         bounds_error=False,
         fill_value=0
     )
 
 def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta):
     #gamma and delta are assumed to be always 1 and 0
-    return get_interpolator(alpha, beta)(X)
+    return get_alpha_stable_pdf_interpolator(alpha, beta)(X)
     
     

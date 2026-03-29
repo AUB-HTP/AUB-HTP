@@ -1,5 +1,5 @@
 from functools import lru_cache
-from scipy.optimize import minimize
+from scipy.optimize import minimize, brentq
 import aub_htp as ht
 from scipy import special
 from scipy.stats import levy_stable
@@ -7,27 +7,39 @@ import numpy as np
 
 
 def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
+    """
+    Isotropic PDF for alpha-stable distribution.
+    Note for maintainers: This function uses the excplicit formulas for the Cauchy and Normal distributions for alpha = 1 and 2.
+    This is for better performance.
+    """
     assert data.ndim == 2
     _, dimensions = data.shape
     if dimensions == 1:
-        return ht.alpha_stable.pdf(data.ravel(), alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
+        if np.isclose(alpha, 2):
+            # Normal distribution: N(0, 1)
+            return (2 * np.pi) ** (-1 / 2) * np.exp(-data ** 2 / 2)
+        elif np.isclose(alpha, 1):
+            # Cauchy distribution: C(0, 1)
+            return 1 / (np.pi * (data ** 2 + 1)) 
+        else:
+            scale = (1 / alpha) ** (1 / alpha)
+            return ht.alpha_stable.pdf(data.ravel(), alpha, 0, loc = 0, scale = scale)
     else:
-        squared_norm = np.sum(data ** 2, axis=1)
-        if alpha == 2:
+        if np.isclose(alpha, 2):
             # Normal distribution: N(0, I)
-            return (2 * np.pi) ** (-dimensions / 2) * np.exp(-squared_norm / 2)
-        elif alpha == 1:
+            return (2 * np.pi) ** (-dimensions / 2) * np.exp(-np.sum(data ** 2, axis=1) / 2)
+        elif np.isclose(alpha, 1):
             # Cauchy distribution
             coefficient = special.gamma((dimensions + 1) / 2) / (np.pi ** ((dimensions + 1) / 2))
-            return coefficient * (1 + squared_norm) ** (-(dimensions + 1) / 2)
+            return coefficient * (1 + np.sum(data ** 2, axis=1)) ** (-(dimensions + 1) / 2)
         else:
             raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1 (Cauchy) or alpha = 2 (Normal)")
 
 
 @lru_cache(maxsize=None)
 def isotropic_entropy(dimensions: int, alpha: float) -> float:
-    if dimensions == 1:
-        return levy_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
+    if dimensions == 1 and not (np.isclose(alpha, 1) or np.isclose(alpha, 2)):
+        return ht.alpha_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
     else:
         if alpha == 2:
             # Normal distribution: N(0, I)
@@ -53,10 +65,10 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
     epsilon = np.finfo(float).eps
     def objective_function(power: float) -> float:
         pdf = np.maximum(isotropic_pdf(data / power, alpha), epsilon)
-        log_pdf = -np.log(pdf)  
+        log_pdf = np.log(pdf)  
         expected_log_pdf = np.mean(log_pdf)
-        return (expected_log_pdf - entropy)**2
-
+        return (expected_log_pdf + entropy)**2
+    
     return minimize(
         objective_function, 
         x0 = 1.0,
@@ -67,7 +79,6 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
             "ftol": float(1e-8),
         }
     ).x.item()
-
 
 
 def deprecated_alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
@@ -110,8 +121,8 @@ def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
             return np.inf
 
         pdf = np.maximum(isotropic_pdf((data - location) / power, alpha), epsilon)
-        log_pdf = -np.log(pdf)  
-        residual = np.mean(log_pdf) - entropy
+        log_pdf = np.log(pdf)  
+        residual = np.mean(log_pdf) + entropy
 
         return power + penalty * residual**2
 
