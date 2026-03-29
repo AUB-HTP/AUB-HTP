@@ -2,6 +2,7 @@ from functools import lru_cache
 from scipy.optimize import minimize
 import aub_htp as ht
 from scipy import special
+from scipy.stats import levy_stable
 import numpy as np
 
 
@@ -26,7 +27,7 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
 @lru_cache(maxsize=None)
 def isotropic_entropy(dimensions: int, alpha: float) -> float:
     if dimensions == 1:
-        return ht.alpha_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
+        return levy_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha))
     else:
         if alpha == 2:
             # Normal distribution: N(0, I)
@@ -68,7 +69,7 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
 
 
 
-def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
+def deprecated_alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
     data = np.asarray(data)
     data_is_one_dimensional = data.ndim == 1
     if data_is_one_dimensional:
@@ -83,6 +84,50 @@ def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
             "ftol": float(1e-8),
         },
     ).x
+    if data_is_one_dimensional:
+        return optimal_location.item()
+    else:
+        return optimal_location
+
+
+def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
+    data = np.asarray(data)
+    data_is_one_dimensional = data.ndim == 1
+    if data_is_one_dimensional:
+        data = data.reshape(-1, 1)
+    
+    _, dimensions = data.shape
+
+    entropy = isotropic_entropy(dimensions, alpha)
+    penalty = 1e6
+
+    def objective_function(log_power_and_location: np.ndarray) -> float: #TODO: ask profs about this objective function
+        power = log_power_and_location[0]
+        location = log_power_and_location[1:]
+        if power < 0:
+            return np.inf
+
+        pdf = isotropic_pdf((data - location) / power, alpha)
+        if np.any(pdf <= 0):
+            print(((data - location) / power)[pdf<=0])
+
+        log_pdf = -np.log(pdf)  
+        residual = np.mean(log_pdf) - entropy
+
+        return power + penalty * residual**2
+
+    optimal_log_power_and_location = minimize(
+        objective_function, 
+        x0 = np.concatenate(([1.0], np.median(data, axis = 0))),
+        method = "Powell",
+        options = {
+            "maxiter": int(5000),
+            "xtol": float(1e-8),
+            "ftol": float(1e-8),
+        },
+    ).x
+
+    optimal_location = optimal_log_power_and_location[1:]
     if data_is_one_dimensional:
         return optimal_location.item()
     else:

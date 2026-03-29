@@ -45,8 +45,7 @@ class alpha_stable_gen(rv_continuous):
         if np.all(alpha == alpha[0]) \
         and np.all(beta == beta[0]) \
         and np.all(delta == delta[0]) \
-        and np.all(gamma == gamma[0]) \
-        and np.all(np.diff(x) > 0):
+        and np.all(gamma == gamma[0]):
             alpha_, beta_, delta_, gamma_ = alpha[0], beta[0], delta[0], gamma[0]
             return super().pdf(
                 x,
@@ -73,15 +72,12 @@ class alpha_stable_gen(rv_continuous):
             return np.array([])
 
         pdf: np.ndarray
-        if np.all(alpha == alpha[0]) and np.all(beta == beta[0]) and np.all(np.diff(x)>0):
-            # Note: -1/2 and 1/2 have been chosen as arbitrary "close" values to x for interpolation to work.
-            padded_x = np.concatenate([[x[0] - 1/2], x, [x[-1] + 1/2]])
-            padded_pdf = generate_alpha_stable_pdf(padded_x, alpha[0], beta[0], 1, 0)
-            pdf = padded_pdf[1:-1]
-
+        if np.all(alpha == alpha[0]) and np.all(beta == beta[0]):
+            pdf = generate_alpha_stable_pdf(x, alpha[0], beta[0], 1, 0)
+            
         else:
             pdf = np.array([
-                generate_alpha_stable_pdf([xi - 1/2, xi, xi + 1/2], ai, bi, 1, 0)[1]
+                generate_alpha_stable_pdf(xi, ai, bi, 1, 0)
                 for xi, ai, bi in zip(x, alpha, beta)
             ])
 

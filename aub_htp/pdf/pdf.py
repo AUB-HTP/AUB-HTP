@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import RegularGridInterpolator, interp1d
 from scipy.integrate import quad_vec
 from functools import lru_cache
 
@@ -326,7 +326,7 @@ def alpha_stable_pdf_core(X, alpha, beta, gamma, delta, ):
     return pdf / gamma
 
 
-def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta, pad_left=10, pad_right=10, growth=1.05): 
+def generate_alpha_stable_pdf_wrap(X, alpha, beta, gamma, delta, pad_left=10, pad_right=10, growth=1.05): 
     """
     Public pdf wrapper with boundary padding and spike cleanup.
     Pipeline:
@@ -349,4 +349,23 @@ def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta, pad_left=10, pad_rig
 
     return dens
 
+@lru_cache(maxsize=128)
+def get_interpolator(alpha, beta):
+    not_quite_0 = np.finfo(float).eps
+    x = np.linspace(-1, 1, 10000) 
+    x = 50 * np.sign(x) * (np.abs(x) ** 10) #TODO: ask profs if this range is good
+    y = generate_alpha_stable_pdf_wrap(x, alpha, beta, 1, 0)
+    y = np.maximum(y, not_quite_0)
+    return interp1d(
+        x,
+        y,
+        kind='cubic',
+        bounds_error=False,
+        fill_value=not_quite_0
+    )
 
+def generate_alpha_stable_pdf(X, alpha, beta, gamma, delta):
+    #gamma and delta are assumed to be always 1 and 0
+    return get_interpolator(alpha, beta)(X)
+    
+    
