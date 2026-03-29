@@ -10,7 +10,7 @@ from ._shape import (
     estimate_shape_method3,
 )
 
-class HeavyTailedCovariance(BaseEstimator):
+class HeavyTailedShape(BaseEstimator):
     def __init__(self, alpha: float = 1.0, alpha_kernel: float = None, alpha_data: float = None, method: MethodLiteral = "method1"):
         self.alpha = alpha
         self.alpha_kernel = alpha_kernel
@@ -35,7 +35,7 @@ class HeavyTailedCovariance(BaseEstimator):
                 f"method must be one of {get_args(MethodLiteral)}, got {self.method!r}."
             )
 
-        self.covariance_ = shape_matrix
+        self.shape_ = shape_matrix
 
         return self
 

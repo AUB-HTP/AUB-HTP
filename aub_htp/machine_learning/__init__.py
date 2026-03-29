@@ -13,13 +13,13 @@ Machine Learning for Alpha Stable Distributions.
 """
 from .regressor import AlphaStableLinearRegressor, l_alpha_loss, r_alpha_score
 from .kmeans import AlphaStableKMeans
-from .covariance import HeavyTailedCovariance
+from .covariance import HeavyTailedShape
 from .pca import HeavyTailedPCA
 
 __all__ = [
     "AlphaStableLinearRegressor",
     "AlphaStableKMeans",
-    "HeavyTailedCovariance",
+    "HeavyTailedShape",
     "HeavyTailedPCA",
     "l_alpha_loss",
     "r_alpha_score",
