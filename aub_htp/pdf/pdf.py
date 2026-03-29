@@ -352,7 +352,7 @@ def generate_alpha_stable_pdf_wrap(X, alpha, beta, gamma, delta, pad_left=10, pa
 @lru_cache(maxsize=128)
 def get_alpha_stable_pdf_interpolator(alpha, beta):
     x = np.linspace(-1, 1, 10000) 
-    x = 50 * np.sign(x) * (np.abs(x) ** 10) #TODO: ask profs if this range is good
+    x = 1e16 * np.sign(x) * (np.abs(x) ** 50) #TODO: ask profs if this range is good
     y = generate_alpha_stable_pdf_wrap(x, alpha, beta, 1, 0)
     y = np.maximum(y, 0)
     return interp1d(
