@@ -127,6 +127,7 @@ class EllipticSampler(BaseSpectralMeasureSampler):
         return float(self._mass)
 
     def _estimate_mass(self, number_of_samples_taken_for_accuracy: int = 100000):
+        # TODO: include random_state
         logging.warning("EllipticSampler(... mass = None), mass was not set. Using estimated mass instead.")
         U = np.random.normal(size=(number_of_samples_taken_for_accuracy, self.dimensions()))
         U /= np.linalg.norm(U, axis=1, keepdims=True)

@@ -64,6 +64,8 @@ def alpha_power(data: np.ndarray, alpha: float) -> float:
     entropy = isotropic_entropy(dimensions, alpha)
     epsilon = np.finfo(float).eps
     def objective_function(power: float) -> float:
+        if power < 0:
+            return np.inf
         pdf = np.maximum(isotropic_pdf(data / power, alpha), epsilon)
         log_pdf = np.log(pdf)  
         expected_log_pdf = np.mean(log_pdf)
