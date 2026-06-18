@@ -5,7 +5,7 @@ from abc import abstractmethod, ABC
 from .util import get_random_state_generator
 
 class BaseSpectralMeasureSampler(ABC):
-    '''
+    r'''
     Spectral Measure Sampler is an interface to define the sampling algorithm for a spectral measure.
     The underlying mathematical spectral measure :math:`\Lambda` has to uphold the following property:
     
