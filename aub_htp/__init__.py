@@ -40,7 +40,7 @@ multivariate_alpha_stable = multivariate_alpha_stable_gen()
 
 
 
-__version__ = "1.0.7"
+__version__ = "1.0.9"
 
 __all__ = [
     # Alpha Stable Scipy-Compatible frontend
