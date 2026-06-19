@@ -1,7 +1,5 @@
 import numpy as np
 from scipy.integrate import quad_vec, quad
-from scipy.special import gamma
-from scipy.special import factorial
 
 def theta0_stable(alpha, beta):
     """
@@ -68,62 +66,10 @@ def generate_pdf_one_point(x, alpha, beta):
         return j * integral[0], j * integral[1]
     # Note: α=1, β=0 (Cauchy) not handled here
 
-def calculate_K(alpha):
-    """
-    Helper used in some parameterizations.
-    K(α) = α - 1 + sign(1 - α)
-    """
-    return alpha - 1 + np.sign(1-alpha)
-
-def transform_to_C_parametrization(alpha, beta):
-    """
-    Convert (α, β) to Nolan's S0 'theta' style (often called θ_C here).
-    - α ≠ 1: θ_C = (2/π) arctan(β tan(πα/2))
-    - α = 1: use a fixed θ_C = 2/π * arctan(2/π) (placeholder convention)
-    Returns (α_C, θ_C) with α_C = α.
-    """
-    if alpha != 1:
-        alpha_c = alpha
-        # theta_c = beta*calculate_K(alpha)/alpha  # alternative form
-        theta_c = (2 / np.pi) * np.arctan(beta * np.tan(np.pi * alpha / 2))
-    else:
-        alpha_c = alpha
-        theta_c = 2/np.pi * np.arctan(2/np.pi)
-    return alpha_c, theta_c
-
-def g_approx_small_x(x, alpha, theta, N=5):
-    """
-    Small-x series for g(x; α, θ) used in near-zero expansions.
-    g(x) ≈ (1/(απ)) Σ_{n=0}^{N-1} x^n/n! * Γ((n+1)/α) * sin[ (π/2)(n+1)(1-θ) ]
-    - Vectorized over x.
-    - Prints (n+1)/α for quick debugging/inspection.
-    """
-    x = np.asarray(x)
-    g_sum = np.zeros_like(x, dtype=np.float64)
-
-    for n in range(N):
-        coef = (x**n) / factorial(n)
-        print((n+1)/alpha)  # debug
-        gamma_term = gamma((n + 1) / alpha)
-        sin_term = np.sin(np.pi / 2 * (n + 1) * (1 - theta))
-        g_sum += coef * gamma_term * sin_term
-
-    return g_sum / (alpha * np.pi)
-
-def remainder_bound(x, alpha, theta, N=10):
-    """
-    Simple upper bound estimate for the neglected tail of the g-series.
-    R_N(x) ≤ |x|^N / N! * Γ((N+1)/α) / (απ)
-    """
-    x = np.asarray(x)
-    coef = np.abs(x)**N / (factorial(N))
-    gamma_term = gamma((N + 1) / alpha)
-    return coef * gamma_term / (alpha * np.pi)
-
 def generate_pdf_one_point_around_zero(X, alpha, beta):
     """
     Direct CF-based integral for pdf near zero using quad_vec.
-    f(x) = (1/π) ∫_0^∞ e^{-t^α} cos(x t − β tan(πα/2) t^α) dt  (S0-style)
+    f(x) = (1/π) ∫_0^∞ e^{-t^α} cos(x t − β tan(πα/2) t^α) dt  (S1-style)
     - Vectorized over X using quad_vec.
     - High accuracy tolerances for stability around x≈0.
     """
@@ -144,9 +90,9 @@ def generate_pdf_zolotarev_1(X, alpha, beta):
     pdf_values = np.array([generate_pdf_one_point(x, alpha, beta) for x in X])[:, 0]
     return pdf_values
 
-def generate_pdf_NolanS0(X, alpha, beta):
+def generate_pdf_NolanS1(X, alpha, beta):
     """
-    CF-integral pdf in Nolan S0 parameterization around zero.
+    CF-integral pdf in Nolan S1 parameterization around zero.
     - Uses generate_pdf_one_point_around_zero for vector X.
     """
     pdf_values = generate_pdf_one_point_around_zero(X, alpha, beta)

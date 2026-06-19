@@ -173,7 +173,10 @@ class alpha_stable_gen(rv_continuous):
     def _get_shift_term(self, alpha: float, beta: float, gamma: float, delta: float, parameterization: Literal["S0", "S1"] | None = None) -> float:
         parameterization = parameterization or self.parameterization
         if parameterization == "S0":
-            return delta
+            if alpha != 1:
+                return delta - gamma * beta * np.tan(alpha * np.pi / 2)
+            else:
+                return delta
         elif parameterization == "S1":
             if alpha != 1:
                 return delta

@@ -5,7 +5,7 @@ from scipy.integrate import quad_vec
 from functools import lru_cache
 
 from .skorohod import skorohod_formula_1, skorohod_formula_3
-from .zolotarev import generate_pdf_zolotarev_1, generate_pdf_NolanS0
+from .zolotarev import generate_pdf_zolotarev_1, generate_pdf_NolanS1
 
 
 def remove_left_monotonicity_spikes(x_vals, pdf_vals):
@@ -142,7 +142,7 @@ def generate_pdf_alpha_less_1(X, alpha, beta):
         if np.any(mask_pos_zo):
             pdf[mask_pos_zo] = generate_pdf_zolotarev_1(X[mask_pos_zo], alpha, beta)
         if np.any(mask_pos_S0):
-            pdf[mask_pos_S0] = generate_pdf_NolanS0(X[mask_pos_S0], alpha, beta)
+            pdf[mask_pos_S0] = generate_pdf_NolanS1(X[mask_pos_S0], alpha, beta)
 
     # Left side (x < 0) via reflection
     mask_neg = X < 0
@@ -169,7 +169,7 @@ def generate_pdf_alpha_less_1(X, alpha, beta):
             if np.any(mask_neg_zo):
                 pdf_reflected[mask_neg_zo] = generate_pdf_zolotarev_1(x_reflected[mask_neg_zo], alpha, beta_flipped)
             if np.any(mask_neg_S0):
-                pdf_reflected[mask_neg_S0] = generate_pdf_NolanS0(x_reflected[mask_neg_S0], alpha, beta_flipped)
+                pdf_reflected[mask_neg_S0] = generate_pdf_NolanS1(x_reflected[mask_neg_S0], alpha, beta_flipped)
 
             pdf[mask_neg] = pdf_reflected
 
@@ -227,9 +227,9 @@ def generate_pdf_alpha_greater_1(X, alpha, beta):
     if np.any(mask_pos_sk):
         pdf[mask_pos_sk] = skorohod_formula_3(X[mask_pos_sk], alpha, beta, N)
     if np.any(mask_pos_zo):
-        pdf[mask_pos_zo] = generate_pdf_NolanS0(X[mask_pos_zo], alpha, beta)
+        pdf[mask_pos_zo] = generate_pdf_NolanS1(X[mask_pos_zo], alpha, beta)
     if np.any(mask_pos_S0):
-        pdf[mask_pos_S0] = generate_pdf_NolanS0(X[mask_pos_S0], alpha, beta)
+        pdf[mask_pos_S0] = generate_pdf_NolanS1(X[mask_pos_S0], alpha, beta)
 
     # Left side by reflection
     mask_neg = X < 0
@@ -253,9 +253,9 @@ def generate_pdf_alpha_greater_1(X, alpha, beta):
         if np.any(mask_neg_sk):
             pdf_reflected[mask_neg_sk] = skorohod_formula_3(x_reflected[mask_neg_sk], alpha, beta_flipped, N)
         if np.any(mask_neg_zo):
-            pdf_reflected[mask_neg_zo] = generate_pdf_NolanS0(x_reflected[mask_neg_zo], alpha, beta_flipped)
+            pdf_reflected[mask_neg_zo] = generate_pdf_NolanS1(x_reflected[mask_neg_zo], alpha, beta_flipped)
         if np.any(mask_neg_S0):
-            pdf_reflected[mask_neg_S0] = generate_pdf_NolanS0(x_reflected[mask_neg_S0], alpha, beta_flipped)
+            pdf_reflected[mask_neg_S0] = generate_pdf_NolanS1(x_reflected[mask_neg_S0], alpha, beta_flipped)
 
         pdf[mask_neg] = pdf_reflected
 
