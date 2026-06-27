@@ -44,7 +44,7 @@ def sample_alpha_stable_vector(
 
 
 def _c(alpha: float, mass: float):
-    return (_kappa(alpha)/mass) ** (-1 / alpha)
+    return (_kappa(alpha)/mass)**(-1 / alpha)
 
 def _kappa(alpha: float):
     if abs(alpha - 1.0) < 1e-12:
