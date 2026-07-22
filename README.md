@@ -1,5 +1,7 @@
 # AUB-HTP
 
+**⚠️ ATTENTION ⚠️ You are currently viewing the unreleased development version of the AUB-HTP codebase. Please find the latest released version of the AUB-HTP codebase v1.0.X [here](https://github.com/AUB-HTP/AUB-HTP/tree/maintenance/v1.0).**
+
 [![Tests](https://github.com/aub-htp/AUB-HTP/actions/workflows/run-tests.yml/badge.svg)](https://github.com/aub-htp/AUB-HTP/actions/workflows/run-tests.yml)
 
 American University of Beirut's Heavy Tails Package (AUB-HTP) aims to provide a modern python toolkit for analyzing Alpha Stable Distributions (also called Levy-Stable distributions)
