@@ -64,8 +64,8 @@ def estimate_number_of_convergence_terms_alpha_0_to_1(mse_error: float, alpha: f
     assert 0 < alpha < 1 and mse_error > 0, "alpha must satisfy 0 < alpha < 1, and mse_error > 0"
     c_alpha = _c(alpha, mass)
     argument = (((1 - alpha) ** 2) * mse_error) / (2 * (alpha ** 2) * (c_alpha ** 2))
-    logn = (alpha / (2 * alpha - 2)) * np.log(argument) + 1
-    return np.exp(logn)
+    logn = (alpha / (2 * alpha - 2)) * np.log(argument)
+    return np.exp(logn) + 1
 
 
 def estimate_number_of_convergence_terms_alpha_1_to_2(mse_error: float, alpha: float, mass: float) -> float:
