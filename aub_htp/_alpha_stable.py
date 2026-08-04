@@ -8,6 +8,7 @@ from scipy.stats._multivariate import multi_rv_generic
 from scipy.stats._distn_infrastructure import _ShapeInfo
 
 from .pdf import generate_alpha_stable_pdf
+from .pdf.multivariate import MultivariateStableDensity
 from .random import sample_alpha_stable_vector, IsotropicSampler, UnivariateSampler, EllipticSampler, DiscreteSampler, BaseSpectralMeasureSampler
 from .random.cms_univariate_sampler import sample_cms
 from .random.alpha_stable_sampler import estimate_number_of_convergence_terms
@@ -185,7 +186,18 @@ class alpha_stable_gen(rv_continuous):
 class multivariate_alpha_stable_gen(multi_rv_generic):
     """
     Multivariate alpha stable distribution generator.
+
+    This class provides the SciPy-compatible `rvs` interface for sampling
+    multivariate alpha-stable law, and a new `pdf` wrapper that caches the last
+    computed :class:`~aub_htp.pdf.multivariate.MultivariateStableDensity`
+    instance so repeated density evaluations reuse the expensive internal
+    precomputations.
     """
+    def __init__(self, seed=None):
+        super().__init__(seed)
+        self._last_pdf_key = None
+        self._last_pdf_model = None
+
     def rvs(self,
         alpha: float,
         spectral_measure_sampler: BaseSpectralMeasureSampler | Literal["standard_isotropic_2d", "standard_isotropic_3d", "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"] = "standard_isotropic_2d",
@@ -225,6 +237,119 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         if size is None:
             return samples[0]
         return samples
+
+    def _pdf_cache_key(
+        self,
+        alpha: float,
+        spectral_measure_sampler: BaseSpectralMeasureSampler | str,
+        shift: npt.ArrayLike,
+        number_of_spectral_samples: int,
+        number_of_sphere_points: int | None,
+        random_state: None | int | np.random.RandomState | np.random.Generator,
+        exact: bool,
+    ):
+        """Build a cache key that uniquely identifies the current pdf setup.
+
+        The key is used to determine whether the last created
+        :class:`~aub_htp.pdf.multivariate.MultivariateStableDensity` instance
+        can be reused for the current call.
+        """
+        key_sampler = (
+            spectral_measure_sampler
+            if isinstance(spectral_measure_sampler, str)
+            else ("obj", id(spectral_measure_sampler))
+        )
+        if isinstance(random_state, (np.random.RandomState, np.random.Generator)):
+            random_state_key = ("obj", id(random_state))
+        else:
+            random_state_key = random_state
+
+        shift_arr = np.asarray(shift, dtype=np.float64)
+        shift_key = (tuple(shift_arr.shape), tuple(shift_arr.ravel()))
+
+        return (
+            alpha,
+            key_sampler,
+            shift_key,
+            number_of_spectral_samples,
+            number_of_sphere_points,
+            random_state_key,
+            exact,
+        )
+
+    def _get_pdf_model(
+        self,
+        alpha: float,
+        spectral_measure_sampler: BaseSpectralMeasureSampler | str,
+        shift: npt.ArrayLike,
+        number_of_spectral_samples: int,
+        number_of_sphere_points: int | None,
+        random_state: None | int | np.random.RandomState | np.random.Generator,
+        exact: bool,
+    ) -> MultivariateStableDensity:
+        """Return a cached MultivariateStableDensity or build a new one.
+
+        If the current pdf setup parameters match the last call, the previously
+        created model is returned. Otherwise, this method constructs a fresh
+        :class:`~aub_htp.pdf.multivariate.MultivariateStableDensity` instance
+        and updates the cached value.
+        """
+        key = self._pdf_cache_key(
+            alpha,
+            spectral_measure_sampler,
+            shift,
+            number_of_spectral_samples,
+            number_of_sphere_points,
+            random_state,
+            exact,
+        )
+        if self._last_pdf_key == key and self._last_pdf_model is not None:
+            return self._last_pdf_model
+
+        sampler = self._check_spectral_measure_sampler(alpha, spectral_measure_sampler)
+        model = MultivariateStableDensity(
+            alpha,
+            sampler,
+            shift=shift,
+            number_of_spectral_samples=number_of_spectral_samples,
+            number_of_sphere_points=number_of_sphere_points,
+            random_state=random_state,
+            exact=exact,
+        )
+        self._last_pdf_key = key
+        self._last_pdf_model = model
+        return model
+
+    def pdf(
+        self,
+        x: npt.ArrayLike,
+        alpha: float,
+        spectral_measure_sampler: BaseSpectralMeasureSampler | Literal[
+            "standard_isotropic_2d", "standard_isotropic_3d",
+            "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"
+        ] = "standard_isotropic_2d",
+        shift: npt.ArrayLike = 0.0,
+        number_of_spectral_samples: int = 200_000,
+        number_of_sphere_points: int | None = None,
+        random_state: None | int | np.random.RandomState | np.random.Generator = None,
+        exact: bool = False,
+    ) -> npt.NDArray:
+        """Evaluate the multivariate alpha-stable density at point(s) x.
+
+        The method reuses the last computed internal density model when the
+        pdf parameters are identical to the previous call. This preserves the
+        costly `MultivariateStableDensity` setup for repeated evaluations.
+        """
+        model = self._get_pdf_model(
+            alpha,
+            spectral_measure_sampler,
+            shift,
+            number_of_spectral_samples,
+            number_of_sphere_points,
+            random_state,
+            exact,
+        )
+        return model.pdf(x)
 
     def _check_spectral_measure_sampler(self, alpha: float, spectral_measure_sampler: BaseSpectralMeasureSampler | str) -> BaseSpectralMeasureSampler:
         if isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler):
