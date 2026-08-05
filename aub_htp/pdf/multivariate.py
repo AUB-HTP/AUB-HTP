@@ -78,10 +78,16 @@ import math
 import numpy as np
 from scipy.integrate import quad_vec
 from scipy.interpolate import CubicSpline, RectBivariateSpline
-from scipy.special import digamma, polygamma
+from scipy.special import digamma, jv, polygamma
 from scipy.special import gamma as gamma_fn
+from scipy.stats import norm, qmc
 
-from aub_htp.random.spectral_measure_sampler import BaseSpectralMeasureSampler
+from aub_htp.random.spectral_measure_sampler import (
+    BaseSpectralMeasureSampler,
+    DiscreteSampler,
+    EllipticSampler,
+    IsotropicSampler,
+)
 
 from .zolotarev import theta0_stable  # noqa: F401  (kept for API discoverability)
 
@@ -476,7 +482,8 @@ class _KernelSpline:
 # --------------------------------------------------------------------------- #
 # Sphere quadrature and projection parameters
 # --------------------------------------------------------------------------- #
-def _sphere_directions(d, number_of_points, random_state=None):
+def _sphere_directions(d, number_of_points, random_state=None, *, method="mc",
+                       antipodal=False):
     """Quadrature nodes ``s_j`` on the unit sphere and the common weight.
 
     Returns ``(points, weight)`` with ``points`` of shape ``(m, d)`` and
@@ -484,8 +491,9 @@ def _sphere_directions(d, number_of_points, random_state=None):
 
     ``d == 1`` is exact (``S^0 = {-1, +1}``), ``d == 2`` uses a deterministic
     equi-angular grid (spectrally accurate for the smooth periodic angular
-    integral), and higher dimensions use uniform random points, i.e. a
-    Monte-Carlo estimate of the sphere integral.
+    integral).  For ``d > 2``, ``method`` may be ``"mc"`` or ``"sobol"``.
+    The latter maps a scrambled Sobol sequence through independent normal
+    quantiles and normalizes it onto the sphere.
     """
     if d == 1:
         return np.array([[1.0], [-1.0]]), 1.0
@@ -495,11 +503,24 @@ def _sphere_directions(d, number_of_points, random_state=None):
         weight = 2.0 * np.pi / number_of_points
         return points, weight
 
-    rng = np.random.default_rng(random_state)
-    points = rng.normal(size=(number_of_points, d))
+    if method not in {"mc", "sobol"}:
+        raise ValueError("sphere method must be 'mc' or 'sobol'")
+
+    base_count = (number_of_points + 1) // 2 if antipodal else number_of_points
+    if method == "mc":
+        rng = np.random.default_rng(random_state)
+        points = rng.normal(size=(base_count, d))
+    else:
+        engine = qmc.Sobol(d=d, scramble=True, seed=random_state)
+        u = engine.random(base_count)
+        eps = np.finfo(np.float64).eps
+        points = norm.ppf(np.clip(u, eps, 1.0 - eps))
+
     points /= np.linalg.norm(points, axis=1, keepdims=True)
+    if antipodal:
+        points = np.concatenate([points, -points], axis=0)[:number_of_points]
     area = 2.0 * np.pi ** (d / 2.0) / gamma_fn(d / 2.0)
-    weight = area / number_of_points
+    weight = area / points.shape[0]
     return points, weight
 
 
@@ -522,6 +543,159 @@ def _projection_parameters(directions, samples, alpha, mass):
         log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
         mu = -(2.0 / np.pi) * mass * np.mean(proj * log_unit, axis=1)
     return sigma, beta, mu
+
+
+def _projection_parameters_batched(directions, samples, alpha, mass,
+                                   batch_size=10_000):
+    """Batched equivalent of :func:`_projection_parameters`.
+
+    The full implementation needs ``len(directions) * len(samples)`` floating
+    point values at once.  This version bounds the temporary projection matrix
+    to ``len(directions) * batch_size`` while accumulating the same empirical
+    moments.
+    """
+    directions = np.asarray(directions, dtype=np.float64)
+    samples = np.asarray(samples, dtype=np.float64)
+    if samples.ndim != 2 or samples.shape[0] == 0:
+        raise ValueError("samples must be a non-empty two-dimensional array")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+
+    sum_abs_alpha = np.zeros(directions.shape[0], dtype=np.float64)
+    sum_signed_abs_alpha = np.zeros_like(sum_abs_alpha)
+    sum_mu = np.zeros_like(sum_abs_alpha) if alpha == 1.0 else None
+
+    for start in range(0, samples.shape[0], batch_size):
+        block = samples[start:start + batch_size]
+        proj = directions @ block.T
+        abs_proj = np.abs(proj)
+        abs_alpha = abs_proj ** alpha
+        sum_abs_alpha += np.sum(abs_alpha, axis=1)
+        sum_signed_abs_alpha += np.sum(np.sign(proj) * abs_alpha, axis=1)
+
+        if sum_mu is not None:
+            sample_norms = np.linalg.norm(block, axis=1)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_unit = np.log(abs_proj / sample_norms[None, :])
+            log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0,
+                                     neginf=0.0)
+            sum_mu += np.sum(proj * log_unit, axis=1)
+
+    factor = float(mass) / samples.shape[0]
+    sigma_alpha = factor * sum_abs_alpha
+    numerator = factor * sum_signed_abs_alpha
+    sigma = sigma_alpha ** (1.0 / alpha)
+    beta = np.divide(numerator, sigma_alpha, out=np.zeros_like(numerator),
+                     where=sigma_alpha > 0.0)
+    beta = np.clip(beta, -1.0, 1.0)
+    mu = None if sum_mu is None else -(2.0 / np.pi) * factor * sum_mu
+    return sigma, beta, mu
+
+
+def _projection_parameters_discrete(directions, positions, weights, alpha):
+    """Exact projection parameters for a finite spectral measure."""
+    directions = np.asarray(directions, dtype=np.float64)
+    positions = np.asarray(positions, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    proj = directions @ positions.T
+    abs_proj = np.abs(proj)
+    weighted_abs_alpha = abs_proj ** alpha * weights[None, :]
+    sigma_alpha = np.sum(weighted_abs_alpha, axis=1)
+    numerator = np.sum(np.sign(proj) * weighted_abs_alpha, axis=1)
+    sigma = sigma_alpha ** (1.0 / alpha)
+    beta = np.divide(numerator, sigma_alpha, out=np.zeros_like(numerator),
+                     where=sigma_alpha > 0.0)
+    beta = np.clip(beta, -1.0, 1.0)
+
+    mu = None
+    if alpha == 1.0:
+        position_norms = np.linalg.norm(positions, axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            log_unit = np.log(abs_proj / position_norms[None, :])
+        log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
+        mu = -(2.0 / np.pi) * np.sum(
+            proj * log_unit * weights[None, :], axis=1)
+    return sigma, beta, mu
+
+
+def _projection_parameters_isotropic(directions, gamma_scale, alpha):
+    """Exact parameters of a rotationally invariant stable law."""
+    sigma = np.full(directions.shape[0], float(gamma_scale))
+    beta = np.zeros(directions.shape[0], dtype=np.float64)
+    mu = np.zeros(directions.shape[0], dtype=np.float64) if alpha == 1.0 else None
+    return sigma, beta, mu
+
+
+def _independent_axis_parameters(sampler, alpha):
+    """Return marginal ``(sigma, beta)`` for an axis-supported measure."""
+    positions = np.asarray(sampler.positions, dtype=np.float64)
+    weights = np.asarray(sampler.weights, dtype=np.float64)
+    nonzero = np.abs(positions) > 0.0
+    if np.any(np.sum(nonzero, axis=1) > 1):
+        return None
+    sigma_alpha = np.sum(
+        weights[:, None] * np.abs(positions) ** alpha, axis=0)
+    if np.any(sigma_alpha <= 0.0):
+        return None
+    numerator = np.sum(
+        weights[:, None] * np.sign(positions) * np.abs(positions) ** alpha,
+        axis=0)
+    sigma = sigma_alpha ** (1.0 / alpha)
+    beta = np.divide(numerator, sigma_alpha, out=np.zeros_like(numerator),
+                     where=sigma_alpha > 0.0)
+    return sigma, np.clip(beta, -1.0, 1.0)
+
+
+def _projection_parameters_elliptical(directions, scatter, mass, alpha):
+    """Exact parameters for ``(s.T @ scatter @ s) ** (alpha / 2)``."""
+    scatter = np.asarray(scatter, dtype=np.float64)
+    quadratic = np.einsum("ij,jk,ik->i", directions, scatter, directions)
+    sigma = float(mass) ** (1.0 / alpha) * np.sqrt(
+        np.maximum(quadratic, 0.0))
+    beta = np.zeros(directions.shape[0], dtype=np.float64)
+    mu = np.zeros(directions.shape[0], dtype=np.float64) if alpha == 1.0 else None
+    return sigma, beta, mu
+
+
+def _isotropic_radial_pdf(radius, alpha, d, gamma_scale, *, gl_nodes=24,
+                          damping_cutoff=60.0):
+    """Isotropic density from its radial Fourier--Bessel transform."""
+    radius = np.atleast_1d(np.asarray(radius, dtype=np.float64))
+    unique_radius, inverse = np.unique(radius, return_inverse=True)
+    out = np.empty_like(unique_radius)
+    at_origin = unique_radius <= 1e-12
+    if np.any(at_origin):
+        sphere_area = 2.0 * np.pi ** (d / 2.0) / gamma_fn(d / 2.0)
+        out[at_origin] = (
+            sphere_area * gamma_fn(d / alpha)
+            / (alpha * (2.0 * np.pi) ** d * gamma_scale ** d)
+        )
+
+    active = ~at_origin
+    if np.any(active):
+        r = unique_radius[active]
+        upper = damping_cutoff ** (1.0 / alpha) / gamma_scale
+        max_phase = max(float(np.max(r)) * upper, 1.0)
+        panels = max(64, int(np.ceil(2.0 * max_phase / (2.0 * np.pi))))
+        nodes, weights = np.polynomial.legendre.leggauss(gl_nodes)
+        edges = np.linspace(0.0, upper, panels + 1)
+        order = d / 2.0 - 1.0
+        half = 0.5 * (edges[1:] - edges[:-1])
+        centres = 0.5 * (edges[1:] + edges[:-1])
+        rho = (centres[:, None] + half[:, None] * nodes[None, :]).ravel()
+        quadrature_weights = (half[:, None] * weights[None, :]).ravel()
+        amplitude = (quadrature_weights * rho ** (d / 2.0)
+                     * np.exp(-(gamma_scale * rho) ** alpha))
+        total = np.empty_like(r)
+        for start in range(0, r.size, 128):
+            block = r[start:start + 128]
+            total[start:start + 128] = jv(
+                order, block[:, None] * rho[None, :]) @ amplitude
+        out[active] = ((2.0 * np.pi) ** (-d / 2.0)
+                       * r ** (1.0 - d / 2.0) * total)
+
+    np.maximum(out, 0.0, out=out)
+    return out[inverse]
 
 
 # --------------------------------------------------------------------------- #
@@ -547,18 +721,28 @@ class MultivariateStableDensity:
     number_of_sphere_points : int, optional
         Sphere quadrature nodes.  Defaults to 360 for ``d == 2`` (the angular
         integrand is smooth and periodic, so this is already converged) and
-        4000 otherwise.
+        4096 otherwise (a power of two preserves Sobol balance properties).
+    sphere_method : {"mc", "sobol"}, optional
+        Higher-dimensional sphere-node generator.  Ignored in dimensions one
+        and two.  Defaults to scrambled Sobol, which has substantially lower
+        error and seed variance in the bundled convergence benchmark.
+    antipodal : bool, optional
+        Pair each higher-dimensional node with its negative.
     random_state : None | int | np.random.Generator, optional
         Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
     exact : bool, optional
         Evaluate the kernel directly instead of through the spline surrogate.
         Slower; used as the reference in tests.
+    projection_batch_size : int, optional
+        Spectral samples projected at once for non-discrete measures.  This
+        bounds setup memory independently of the total sample count.
     """
 
     def __init__(self, alpha, spectral_measure_sampler: BaseSpectralMeasureSampler,
                  shift=0.0, number_of_spectral_samples=200_000,
                  number_of_sphere_points=None, random_state=None,
-                 exact=False):
+                 exact=False, projection_batch_size=1_000,
+                 sphere_method="sobol", antipodal=False):
         if not 0.0 < alpha <= 2.0:
             raise ValueError(f"alpha must lie in (0, 2], got {alpha}")
         alpha = float(alpha)
@@ -573,26 +757,44 @@ class MultivariateStableDensity:
         self.alpha = alpha
         self.dimensions = d
         self.sampler = spectral_measure_sampler
+        self._independent_params = (
+            _independent_axis_parameters(spectral_measure_sampler, alpha)
+            if isinstance(spectral_measure_sampler, DiscreteSampler) else None
+        )
         self.exact = bool(exact)
         self.shift = np.broadcast_to(np.asarray(shift, dtype=np.float64), (d,))
 
         if number_of_sphere_points is None:
-            number_of_sphere_points = 360 if d == 2 else 4000
+            number_of_sphere_points = 360 if d == 2 else 4096
         self.number_of_sphere_points = int(number_of_sphere_points)
 
-        samples = spectral_measure_sampler.sample(number_of_spectral_samples,
-                                                  random_state)
         self.directions, self.weight = _sphere_directions(
-            d, self.number_of_sphere_points, random_state)
-        self.sigma, self.beta, self.mu = _projection_parameters(
-            self.directions, samples, alpha, spectral_measure_sampler.mass())
+            d, self.number_of_sphere_points, random_state,
+            method=sphere_method, antipodal=antipodal)
+        if isinstance(spectral_measure_sampler, IsotropicSampler):
+            self.sigma, self.beta, self.mu = _projection_parameters_isotropic(
+                self.directions, spectral_measure_sampler.gamma, alpha)
+        elif isinstance(spectral_measure_sampler, EllipticSampler):
+            self.sigma, self.beta, self.mu = _projection_parameters_elliptical(
+                self.directions, spectral_measure_sampler.sigma,
+                spectral_measure_sampler.mass(), alpha)
+        elif isinstance(spectral_measure_sampler, DiscreteSampler):
+            self.sigma, self.beta, self.mu = _projection_parameters_discrete(
+                self.directions, spectral_measure_sampler.positions,
+                spectral_measure_sampler.weights, alpha)
+        else:
+            samples = spectral_measure_sampler.sample(number_of_spectral_samples,
+                                                      random_state)
+            self.sigma, self.beta, self.mu = _projection_parameters_batched(
+                self.directions, samples, alpha, spectral_measure_sampler.mass(),
+                batch_size=projection_batch_size)
 
         self._valid = self.sigma > 0.0
         self._inv_sigma_d = np.zeros_like(self.sigma)
         self._inv_sigma_d[self._valid] = self.sigma[self._valid] ** (-d)
 
         self._kernel = None
-        if not self.exact:
+        if not self.exact and not isinstance(self.sampler, IsotropicSampler):
             self._kernel = _KernelSpline(alpha, d, self.beta[self._valid])
 
     # -- internals ------------------------------------------------------ #
@@ -628,6 +830,39 @@ class MultivariateStableDensity:
                 f"x has dimension {x.shape[-1]} but the spectral measure is "
                 f"{self.dimensions}-dimensional"
             )
+
+        if isinstance(self.sampler, IsotropicSampler):
+            densities = _isotropic_radial_pdf(
+                np.linalg.norm(x - self.shift, axis=1), self.alpha,
+                self.dimensions, self.sampler.gamma)
+            return densities[0] if single else densities
+
+        if isinstance(self.sampler, EllipticSampler) and self.sampler.mass() > 0.0:
+            transform = (self.sampler.mass() ** (1.0 / self.alpha)
+                         * np.linalg.cholesky(self.sampler.sigma))
+            radial_coordinates = np.linalg.solve(
+                transform, (x - self.shift).T).T
+            densities = _isotropic_radial_pdf(
+                np.linalg.norm(radial_coordinates, axis=1), self.alpha,
+                self.dimensions, gamma_scale=1.0)
+            densities /= abs(np.linalg.det(transform))
+            return densities[0] if single else densities
+
+        if self._independent_params is not None:
+            # Import lazily to avoid the public wrapper's import cycle while
+            # this module is initialized.  Axis-supported spectral measures
+            # factorize exactly into the package's own univariate S1 laws.
+            from aub_htp import alpha_stable
+            marginal_sigma, marginal_beta = self._independent_params
+            densities = np.ones(x.shape[0], dtype=np.float64)
+            for axis in range(self.dimensions):
+                coordinates, inverse = np.unique(
+                    x[:, axis], return_inverse=True)
+                values = alpha_stable.pdf(
+                    coordinates, self.alpha, marginal_beta[axis],
+                    loc=self.shift[axis], scale=marginal_sigma[axis])
+                densities *= values[inverse]
+            return densities[0] if single else densities
 
         valid = self._valid
         beta_valid = self.beta[valid]
@@ -666,6 +901,8 @@ def multivariate_alpha_stable_pdf(
     number_of_sphere_points=None,
     random_state=None,
     exact=False,
+    sphere_method="sobol",
+    antipodal=False,
 ):
     """Numerical multivariate alpha-stable density.
 
@@ -691,6 +928,10 @@ def multivariate_alpha_stable_pdf(
         Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
     exact : bool, optional
         Bypass the spline surrogate and evaluate the kernel directly.
+    sphere_method : {"mc", "sobol"}, optional
+        Higher-dimensional sphere-node generator.
+    antipodal : bool, optional
+        Pair higher-dimensional sphere nodes with their negatives.
 
     Returns
     -------
@@ -705,5 +946,7 @@ def multivariate_alpha_stable_pdf(
         number_of_sphere_points=number_of_sphere_points,
         random_state=random_state,
         exact=exact,
+        sphere_method=sphere_method,
+        antipodal=antipodal,
     )
     return model.pdf(x)

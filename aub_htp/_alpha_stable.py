@@ -247,6 +247,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         number_of_sphere_points: int | None,
         random_state: None | int | np.random.RandomState | np.random.Generator,
         exact: bool,
+        sphere_method: str,
+        antipodal: bool,
     ):
         """Build a cache key that uniquely identifies the current pdf setup.
 
@@ -275,6 +277,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             number_of_sphere_points,
             random_state_key,
             exact,
+            sphere_method,
+            antipodal,
         )
 
     def _get_pdf_model(
@@ -286,6 +290,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         number_of_sphere_points: int | None,
         random_state: None | int | np.random.RandomState | np.random.Generator,
         exact: bool,
+        sphere_method: str,
+        antipodal: bool,
     ) -> MultivariateStableDensity:
         """Return a cached MultivariateStableDensity or build a new one.
 
@@ -302,6 +308,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             number_of_sphere_points,
             random_state,
             exact,
+            sphere_method,
+            antipodal,
         )
         if self._last_pdf_key == key and self._last_pdf_model is not None:
             return self._last_pdf_model
@@ -315,6 +323,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             number_of_sphere_points=number_of_sphere_points,
             random_state=random_state,
             exact=exact,
+            sphere_method=sphere_method,
+            antipodal=antipodal,
         )
         self._last_pdf_key = key
         self._last_pdf_model = model
@@ -333,6 +343,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         number_of_sphere_points: int | None = None,
         random_state: None | int | np.random.RandomState | np.random.Generator = None,
         exact: bool = False,
+        sphere_method: str = "sobol",
+        antipodal: bool = False,
     ) -> npt.NDArray:
         """Evaluate the multivariate alpha-stable density at point(s) x.
 
@@ -348,6 +360,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             number_of_sphere_points,
             random_state,
             exact,
+            sphere_method,
+            antipodal,
         )
         return model.pdf(x)
 
