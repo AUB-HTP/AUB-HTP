@@ -20,6 +20,7 @@ include = ["aub_htp*"]
 [tool.setuptools.package-data]
 aub_htp = [
     "pdf/data/*.npz",
+    "cdf/data/*.npz",
     "machine_learning/_shape/data/*.npz",
 ]
 
