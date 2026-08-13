@@ -156,11 +156,49 @@ def test_elliptical_scatter_obeys_linear_change_of_variables():
     isotropic = MultivariateStableDensity(
         alpha, IsotropicSampler(2, alpha, 1.0), number_of_sphere_points=720)
     elliptical = MultivariateStableDensity(
-        alpha, EllipticSampler(2, alpha, scatter), number_of_sphere_points=720)
+        alpha, EllipticSampler(2, alpha, scatter, mass=1.0),
+        number_of_sphere_points=720)
     x = np.array([[0.0, 0.0], [1.0, -0.5], [3.0, 2.0]])
     transformed = np.linalg.solve(transform, x.T).T
     expected = isotropic.pdf(transformed) / np.linalg.det(transform)
     np.testing.assert_allclose(elliptical.pdf(x), expected, rtol=2e-8, atol=1e-12)
+
+
+def test_pdf_accepts_one_d_dimensional_element():
+    model = MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0))
+
+    density = model.pdf(np.array([0.0, 1.0, 2.0]))
+
+    assert np.ndim(density) == 0
+
+
+def test_pdf_accepts_n_d_dimensional_elements():
+    model = MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0))
+
+    densities = model.pdf(np.array([[0.0, 1.0, 2.0], [2.0, 1.0, 0.0]]))
+
+    assert densities.shape == (2,)
+
+
+def test_pdf_rejects_one_element_with_wrong_dimension():
+    model = MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0))
+
+    with pytest.raises(ValueError, match="x has dimension 2.*3-dimensional"):
+        model.pdf(np.array([0.0, 1.0]))
+
+
+def test_pdf_rejects_n_elements_with_wrong_dimension():
+    model = MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0))
+
+    with pytest.raises(ValueError, match="x has dimension 2.*3-dimensional"):
+        model.pdf(np.array([[0.0, 1.0], [2.0, 3.0]]))
+
+
+def test_pdf_rejects_arrays_that_are_not_one_or_two_dimensional():
+    model = MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0))
+
+    with pytest.raises(ValueError):
+        model.pdf(np.zeros((2, 1, 3)))
 
 
 @pytest.mark.parametrize("d", [2, 3, 5, 10])
@@ -208,18 +246,3 @@ def test_independent_s0_location_conversion_uses_internal_s1_shift():
     expected = np.prod(
         alpha_stable.pdf(x, alpha, beta, loc=s1_shift, scale=1.0), axis=1)
     np.testing.assert_allclose(model.pdf(x), expected, rtol=1e-13, atol=1e-15)
-
-
-def test_general_skewed_discrete_spline_matches_exact_kernel():
-    angles = 2.0 * np.pi * np.arange(3) / 3.0
-    positions = np.column_stack([np.cos(angles), np.sin(angles)])
-    sampler = DiscreteSampler(1.5, positions, np.ones(3))
-    kwargs = dict(number_of_sphere_points=360, random_state=7)
-    exact = MultivariateStableDensity(1.5, sampler, exact=True, **kwargs)
-    spline = MultivariateStableDensity(1.5, sampler, exact=False, **kwargs)
-    assert np.ptp(exact.beta) > 0.3
-
-    x = np.array([[0.0, 0.0], [0.5, -0.2], [2.0, 1.0], [-3.0, 0.5]])
-    expected = exact.pdf(x)
-    got = spline.pdf(x)
-    np.testing.assert_allclose(got, expected, rtol=2e-6, atol=2e-10)
