@@ -6,17 +6,9 @@ alpha-stable distributions.
 """
 
 import numpy as np
+import logging
+
 from numpy.fft import fftshift, ifftshift, ifftn
-
-from aub_htp import IsotropicSampler, sample_alpha_stable_vector
-
-
-def sample_spectral_measure(n_samples, d, alpha):
-    """Return mass, spectral-measure sampler, and iid spectral samples."""
-    sampler = IsotropicSampler(d, alpha, 1)
-    samples = sampler.sample(n_samples)
-    return sampler.mass(), sampler, samples
-
 
 def make_frequency_grid(n, dt, d):
     """Create a centered frequency grid containing zero exactly.
@@ -119,17 +111,17 @@ def inverse_fourier_pdf(phi, dt, verbose=False):
     pdf *= (n * dt / (2.0 * np.pi)) ** d
 
     if verbose:
-        print("\n========== FFT diagnostics ===========")
-        print("dimension:", d)
-        print("grid:", phi.shape)
-        print("dt =", dt)
-        print("dx =", dx)
-        print("\nPDF diagnostics")
-        print("----------------")
-        print("min pdf:", pdf.min())
-        print("max pdf:", pdf.max())
+        logging.debug("\n========== FFT diagnostics ===========")
+        logging.debug("dimension:", d)
+        logging.debug("grid:", phi.shape)
+        logging.debug("dt =", dt)
+        logging.debug("dx =", dx)
+        logging.debug("\nPDF diagnostics")
+        logging.debug("----------------")
+        logging.debug("min pdf:", pdf.min())
+        logging.debug("max pdf:", pdf.max())
         negative = np.sum(np.abs(pdf[pdf < 0]))
-        print("negative mass:", negative)
-        print("PDF integral:", pdf.sum() * dx**d)
+        logging.debug("negative mass:", negative)
+        logging.debug("PDF integral:", pdf.sum() * dx**d)
 
     return pdf, dx
