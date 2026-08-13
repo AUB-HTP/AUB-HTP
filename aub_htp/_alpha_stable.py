@@ -188,7 +188,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
     Multivariate alpha stable distribution generator.
 
     This class provides the SciPy-compatible `rvs` interface for sampling
-    multivariate alpha-stable law, and a new `pdf` wrapper that caches the last
+    multivariate alpha-stable law, and a `pdf` wrapper that caches the last
     computed :class:`~aub_htp.pdf.multivariate.MultivariateStableDensity`
     instance so repeated density evaluations reuse the expensive internal
     precomputations.
