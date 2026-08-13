@@ -110,7 +110,7 @@ class EllipticSampler(BaseSpectralMeasureSampler):
         self.number_of_dimensions = number_of_dimensions
         self.alpha = alpha
         self.sigma = np.asarray(sigma)
-        self._mass = mass or self._estimate_mass()
+        self._mass = self._estimate_mass() if mass is None else mass
 
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         random_state = get_random_state_generator(random_state)
