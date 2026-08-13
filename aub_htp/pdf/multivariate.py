@@ -74,8 +74,10 @@ test-suite uses that path as the reference.
 """
 
 import math
+from collections import OrderedDict
 
 import numpy as np
+import numpy.typing as npt
 from scipy.integrate import quad_vec
 from scipy.interpolate import CubicSpline, RectBivariateSpline
 from scipy.special import digamma, jv, polygamma
@@ -88,6 +90,49 @@ from aub_htp.random.spectral_measure_sampler import (
     EllipticSampler,
     IsotropicSampler,
 )
+
+
+_PDF_MODEL_CACHE_MAXSIZE = 8
+_pdf_model_cache = OrderedDict()
+
+
+def _array_key(array: npt.ArrayLike):
+    """Return a hashable, value-based key for an array-like argument."""
+    value = np.asarray(array)
+    return value.dtype.str, value.shape, value.tobytes()
+
+
+def _measure_key(measure: BaseSpectralMeasureSampler):
+    """Return a stable cache key for built-in spectral measures."""
+    if isinstance(measure, IsotropicSampler):
+        return (
+            "isotropic", measure.dimensions(), measure.alpha, measure.gamma,
+            measure.mass(),
+        )
+    if isinstance(measure, EllipticSampler):
+        return (
+            "elliptical", measure.dimensions(), measure.alpha,
+            _array_key(measure.sigma), measure.mass(),
+        )
+    if isinstance(measure, DiscreteSampler):
+        return (
+            "discrete", measure.dimensions(), _array_key(measure.positions),
+            _array_key(measure.weights), measure.mass(),
+        )
+    # Custom samplers have no general value representation. The cached model
+    # retains the sampler, so its identity cannot be reused while cached.
+    return "object", id(measure)
+
+
+def _random_state_key(random_state):
+    if isinstance(random_state, (np.random.RandomState, np.random.Generator)):
+        return "object", id(random_state)
+    return random_state
+
+
+def clear_pdf_model_cache():
+    """Discard all cached multivariate density models."""
+    _pdf_model_cache.clear()
 
 from .zolotarev import theta0_stable  # noqa: F401  (kept for API discoverability)
 
@@ -892,6 +937,49 @@ class MultivariateStableDensity:
     __call__ = pdf
 
 
+def get_pdf_model(
+    alpha: float,
+    spectral_measure_sampler: BaseSpectralMeasureSampler,
+    shift: npt.ArrayLike = 0.0,
+    number_of_spectral_samples: int = 200_000,
+    number_of_sphere_points: int | None = None,
+    random_state=None,
+    exact: bool = False,
+    sphere_method: str = "sobol",
+    antipodal: bool = False,
+) -> MultivariateStableDensity:
+    """Return a cached density model, constructing it on a cache miss."""
+    key = (
+        float(alpha),
+        _measure_key(spectral_measure_sampler),
+        _array_key(np.asarray(shift, dtype=np.float64)),
+        number_of_spectral_samples,
+        number_of_sphere_points,
+        _random_state_key(random_state),
+        bool(exact),
+        sphere_method,
+        bool(antipodal),
+    )
+    try:
+        model = _pdf_model_cache.pop(key)
+    except KeyError:
+        model = MultivariateStableDensity(
+            alpha,
+            spectral_measure_sampler,
+            shift=shift,
+            number_of_spectral_samples=number_of_spectral_samples,
+            number_of_sphere_points=number_of_sphere_points,
+            random_state=random_state,
+            exact=exact,
+            sphere_method=sphere_method,
+            antipodal=antipodal,
+        )
+    _pdf_model_cache[key] = model
+    if len(_pdf_model_cache) > _PDF_MODEL_CACHE_MAXSIZE:
+        _pdf_model_cache.popitem(last=False)
+    return model
+
+
 def multivariate_alpha_stable_pdf(
     x,
     alpha,
@@ -906,9 +994,9 @@ def multivariate_alpha_stable_pdf(
 ):
     """Numerical multivariate alpha-stable density.
 
-    Thin wrapper over :class:`MultivariateStableDensity` for one-shot use.
-    Construct the class directly to reuse the (relatively expensive) setup
-    across several evaluations.
+    Thin cached wrapper over :class:`MultivariateStableDensity` for one-shot
+    use. Construct the class directly when explicit control over a model's
+    lifetime is preferred.
 
     Parameters
     ----------
@@ -938,7 +1026,7 @@ def multivariate_alpha_stable_pdf(
     density : float or np.ndarray
         Scalar for a single point, otherwise shape ``(n,)``.
     """
-    model = MultivariateStableDensity(
+    model = get_pdf_model(
         alpha,
         spectral_measure_sampler,
         shift=shift,

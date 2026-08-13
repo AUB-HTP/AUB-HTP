@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from aub_htp import multivariate_alpha_stable
+from aub_htp.pdf.multivariate import clear_pdf_model_cache, get_pdf_model
+from aub_htp.random import IsotropicSampler
 
 
 def test_empty_input_returns_empty():
@@ -56,23 +58,16 @@ def test_wrong_dimension_point_raises():
 
 
 def test_pdf_cache_reuse():
-    # Force a clean cache
-    multivariate_alpha_stable._last_pdf_model = None
-    multivariate_alpha_stable._last_pdf_key = None
-
-    pts = np.array([[0.0, 0.0], [0.1, 0.0]])
+    clear_pdf_model_cache()
     kwargs = dict(
         alpha=1.5,
-        spectral_measure_sampler="standard_isotropic_2d",
         number_of_spectral_samples=1000,
         random_state=0,
     )
 
-    _ = multivariate_alpha_stable.pdf(pts, **kwargs)
-    first_id = id(multivariate_alpha_stable._last_pdf_model)
+    first = get_pdf_model(
+        spectral_measure_sampler=IsotropicSampler(2, 1.5, 1.0), **kwargs)
+    second = get_pdf_model(
+        spectral_measure_sampler=IsotropicSampler(2, 1.5, 1.0), **kwargs)
 
-    # same call should reuse cached model
-    _ = multivariate_alpha_stable.pdf(pts, **kwargs)
-    second_id = id(multivariate_alpha_stable._last_pdf_model)
-
-    assert first_id == second_id
+    assert first is second
