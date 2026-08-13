@@ -18,7 +18,7 @@ def sample_alpha_stable_vector(
     mass = spectral_measure.mass()
     shift_vector = np.broadcast_to(shift_vector, dimensions)
 
-    number_of_convergence_terms = int(estimate_number_of_convergence_terms(error, alpha, mass))
+    number_of_convergence_terms = int(np.ceil(estimate_number_of_convergence_terms(error, alpha, mass)))
     if number_of_convergence_terms > max_number_of_convergence_terms:
         logging.warning(f"Estimated number of convergence terms {number_of_convergence_terms} exceeded the maximum number of convergence terms {max_number_of_convergence_terms}. Using {max_number_of_convergence_terms} convergence terms.")
         number_of_convergence_terms = max_number_of_convergence_terms
