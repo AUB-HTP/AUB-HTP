@@ -47,3 +47,8 @@ dev = [
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: heavier checks (e.g. full 2D grids from the point-wise projection method); deselect with -m 'not slow'",
+]

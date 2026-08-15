@@ -110,7 +110,7 @@ class EllipticSampler(BaseSpectralMeasureSampler):
         self.number_of_dimensions = number_of_dimensions
         self.alpha = alpha
         self.sigma = np.asarray(sigma)
-        self._mass = mass or self._estimate_mass()
+        self._mass = self._estimate_mass() if mass is None else mass
 
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         random_state = get_random_state_generator(random_state)
@@ -126,10 +126,17 @@ class EllipticSampler(BaseSpectralMeasureSampler):
     def mass(self) -> float:
         return float(self._mass)
 
-    def _estimate_mass(self, number_of_samples_taken_for_accuracy: int = 1000000):
-        # TODO: include random_state
+    def _estimate_mass(
+        self,
+        number_of_samples_taken_for_accuracy: int = 1_000_000,
+        random_state: None | int | np.random.RandomState | np.random.Generator = None,
+    ):
+        """Estimate and return the transformed spectral mass reproducibly."""
+        if number_of_samples_taken_for_accuracy <= 0:
+            raise ValueError("number_of_samples_taken_for_accuracy must be positive")
         logging.warning("EllipticSampler(... mass = None), mass was not set. Using estimated mass instead.")
-        U = np.random.normal(size=(number_of_samples_taken_for_accuracy, self.dimensions()))
+        rng = get_random_state_generator(random_state)
+        U = rng.normal(size=(number_of_samples_taken_for_accuracy, self.dimensions()))
         U /= np.linalg.norm(U, axis=1, keepdims=True)
         L = np.linalg.cholesky(self.sigma)
         norms = np.linalg.norm(U @ L.T, axis=1) ** self.alpha

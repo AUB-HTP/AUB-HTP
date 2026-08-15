@@ -8,6 +8,7 @@ from scipy.stats._multivariate import multi_rv_generic
 from scipy.stats._distn_infrastructure import _ShapeInfo
 
 from .pdf import generate_alpha_stable_pdf
+from .pdf.multivariate import get_pdf_model
 from .random import sample_alpha_stable_vector, IsotropicSampler, UnivariateSampler, EllipticSampler, DiscreteSampler, BaseSpectralMeasureSampler
 from .random.cms_univariate_sampler import sample_cms
 from .random.alpha_stable_sampler import estimate_number_of_convergence_terms
@@ -185,7 +186,15 @@ class alpha_stable_gen(rv_continuous):
 class multivariate_alpha_stable_gen(multi_rv_generic):
     """
     Multivariate alpha stable distribution generator.
+
+    This class provides the SciPy-compatible `rvs` interface for sampling
+    multivariate alpha-stable law, and a `pdf` wrapper that caches the last
+    computed density model so repeated evaluations reuse expensive internal
+    precomputations.
     """
+    def __init__(self, seed=None):
+        super().__init__(seed)
+
     def rvs(self,
         alpha: float,
         spectral_measure_sampler: BaseSpectralMeasureSampler | Literal["standard_isotropic_2d", "standard_isotropic_3d", "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"] = "standard_isotropic_2d",
@@ -225,6 +234,43 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         if size is None:
             return samples[0]
         return samples
+
+    def pdf(
+        self,
+        x: npt.ArrayLike,
+        alpha: float,
+        spectral_measure_sampler: BaseSpectralMeasureSampler | Literal[
+            "standard_isotropic_2d", "standard_isotropic_3d",
+            "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"
+        ] = "standard_isotropic_2d",
+        shift: npt.ArrayLike = 0.0,
+        number_of_spectral_samples: int = 200_000,
+        number_of_sphere_points: int | None = None,
+        random_state: None | int | np.random.RandomState | np.random.Generator = None,
+        exact: bool = False,
+        sphere_method: str = "sobol",
+        antipodal: bool = False,
+    ) -> npt.NDArray:
+        """Evaluate the multivariate alpha-stable density at point(s) x.
+
+        The method reuses the last computed internal density model when the
+        pdf parameters are identical to the previous call. This preserves the
+        costly `MultivariateStableDensity` setup for repeated evaluations.
+        """
+        sampler = self._check_spectral_measure_sampler(
+            alpha, spectral_measure_sampler)
+        model = get_pdf_model(
+            alpha,
+            sampler,
+            shift,
+            number_of_spectral_samples,
+            number_of_sphere_points,
+            random_state,
+            exact,
+            sphere_method,
+            antipodal,
+        )
+        return model.pdf(x)
 
     def _check_spectral_measure_sampler(self, alpha: float, spectral_measure_sampler: BaseSpectralMeasureSampler | str) -> BaseSpectralMeasureSampler:
         if isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler):
