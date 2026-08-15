@@ -200,6 +200,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         spectral_measure_sampler: BaseSpectralMeasureSampler | Literal["standard_isotropic_2d", "standard_isotropic_3d", "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"] = "standard_isotropic_2d",
         shift: np.ndarray = 0,
         size: int | None = None,
+        error: float = 0.01,
         random_state: None | int | np.random.RandomState | np.random.Generator = None,
     ):
         """
@@ -230,7 +231,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         """
         spectral_measure_sampler = self._check_spectral_measure_sampler(alpha, spectral_measure_sampler)
         assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
-        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, random_state = random_state)
+        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, error = error, random_state = random_state)
         if size is None:
             return samples[0]
         return samples
