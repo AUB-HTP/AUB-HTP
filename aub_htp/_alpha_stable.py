@@ -200,7 +200,8 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
         samples: np.ndarray
         if isinstance(spectral_measure_sampler, EllipticSampler):
-            samples = sample_elliptical(alpha, spectral_measure_sampler.sigma, size, random_state)
+            samples = sample_elliptical(alpha, spectral_measure_sampler.sigma, size or 1, random_state)
+            samples += np.broadcast_to(shift, spectral_measure_sampler.dimensions())
         else:
             samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, error = error, random_state = random_state)
         if size is None:
