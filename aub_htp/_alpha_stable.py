@@ -12,6 +12,7 @@ from .pdf.multivariate import get_pdf_model
 from .random import sample_alpha_stable_vector, IsotropicSampler, UnivariateSampler, EllipticSampler, DiscreteSampler, BaseSpectralMeasureSampler
 from .random.cms_univariate_sampler import sample_cms
 from .random.alpha_stable_sampler import estimate_number_of_convergence_terms
+from .random.elliptical_sampler_method import sample_elliptical
 import logging
 
 class alpha_stable_gen(rv_continuous):
@@ -231,7 +232,17 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         """
         spectral_measure_sampler = self._check_spectral_measure_sampler(alpha, spectral_measure_sampler)
         assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
-        samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, error = error, random_state = random_state)
+        samples: np.ndarray
+        if isinstance(spectral_measure_sampler, (EllipticSampler, IsotropicSampler)):
+            if isinstance(spectral_measure_sampler, IsotropicSampler):
+                dimensions = spectral_measure_sampler.dimensions()
+                sigma = 2 * spectral_measure_sampler.gamma**2 * np.eye(dimensions)
+            else:
+                sigma = spectral_measure_sampler.sigma
+            samples = sample_elliptical(alpha, sigma, size or 1, random_state)
+            samples += np.broadcast_to(shift, spectral_measure_sampler.dimensions())
+        else:
+            samples = sample_alpha_stable_vector(alpha, spectral_measure_sampler, size or 1, shift, error = error, random_state = random_state)
         if size is None:
             return samples[0]
         return samples
