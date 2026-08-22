@@ -21,6 +21,7 @@ import pytest
 import numpy as np
 from scipy.stats import levy_stable
 
+from aub_htp import alpha_stable
 from aub_htp.cdf import generate_alpha_stable_cdf
 from aub_htp.cdf.cdf import describe_intervals, generate_switching_intervals
 
@@ -278,3 +279,113 @@ class TestCdfParameterValidation:
         """beta must satisfy -1 <= beta <= 1."""
         with pytest.raises(Exception):
             generate_alpha_stable_cdf(np.array([0.0]), 1.5, beta)
+
+
+@pytest.fixture(autouse=True)
+def _restore_parameterization():
+    """
+    alpha_stable is a module-level singleton and with_parametrization mutates it,
+    so a test that switches to S0 would otherwise leak into every test after it.
+    """
+    yield
+    alpha_stable.parameterization = "S1"
+
+
+class TestFrontendCdfDimensions:
+    """alpha_stable.cdf follows the same broadcasting conventions as .pdf."""
+
+    def test_scalar_x(self):
+        """Scalar x -> scalar output."""
+        result = alpha_stable.cdf(0.0, alpha=1.5, beta=0.0)
+        assert np.isscalar(result) or np.asarray(result).shape == ()
+
+    def test_1d_x(self):
+        """1D x -> 1D output of the same length."""
+        assert alpha_stable.cdf(np.linspace(-2, 2, 10), 1.5, 0.0).shape == (10,)
+
+    def test_list_x(self):
+        """List x is accepted."""
+        assert alpha_stable.cdf([-1.0, 0.0, 1.0], 1.5, 0.0).shape == (3,)
+
+    def test_empty_x(self):
+        """Empty x -> empty output."""
+        assert alpha_stable.cdf(np.array([]), 1.5, 0.0).shape == (0,)
+
+    def test_array_alpha(self):
+        """Array alpha broadcasts."""
+        assert alpha_stable.cdf(0.0, alpha=np.array([1.2, 1.5, 1.8]), beta=0.0).shape == (3,)
+
+    def test_array_beta(self):
+        """Array beta broadcasts."""
+        assert alpha_stable.cdf(0.0, alpha=1.5, beta=np.array([-0.5, 0.0, 0.5])).shape == (3,)
+
+    def test_array_loc_scale(self):
+        """Array loc and scale broadcast."""
+        result = alpha_stable.cdf(
+            np.array([0.0, 1.0]), 1.5, 0.0,
+            loc=np.array([0.0, 1.0]), scale=np.array([1.0, 2.0]),
+        )
+        assert result.shape == (2,)
+
+
+class TestFrontendCdfValues:
+    """The frontend must agree with the wrapper it delegates to."""
+
+    @pytest.mark.parametrize("alpha,beta", CONFIGURATIONS)
+    def test_matches_wrapper_at_unit_scale(self, alpha, beta):
+        """With loc=0, scale=1 the frontend equals generate_alpha_stable_cdf."""
+        x = np.linspace(-20, 20, 41)
+        assert np.max(np.abs(
+            alpha_stable.cdf(x, alpha, beta) - generate_alpha_stable_cdf(x, alpha, beta)
+        )) < 1e-12
+
+    @pytest.mark.parametrize("alpha,beta", [(0.8, -0.5), (1.5, 0.0), (1.8, 0.8)])
+    def test_matches_scipy_with_loc_scale(self, alpha, beta):
+        """loc/scale behave as scipy's do."""
+        x = np.linspace(-20, 20, 41)
+        ours = alpha_stable.cdf(x, alpha, beta, loc=1.0, scale=2.0)
+        reference = levy_stable.cdf(x, alpha, beta, loc=1.0, scale=2.0)
+        assert np.max(np.abs(ours - reference)) < SCIPY_TOLERANCE
+
+    def test_survival_is_one_minus_cdf(self):
+        """sf now routes through _cdf and must stay consistent with it."""
+        x = np.linspace(-10, 10, 21)
+        assert np.max(np.abs(
+            alpha_stable.sf(x, 1.5, 0.0) - (1.0 - alpha_stable.cdf(x, 1.5, 0.0))
+        )) < 1e-12
+
+    @pytest.mark.parametrize("q", [0.1, 0.25, 0.5, 0.75, 0.9])
+    def test_quantile_round_trip(self, q):
+        """ppf is inverted from _cdf, so cdf(ppf(q)) must return q."""
+        assert abs(alpha_stable.cdf(alpha_stable.ppf(q, 1.5, 0.0), 1.5, 0.0) - q) < 1e-6
+
+
+class TestFrontendCdfParameterization:
+    """S0 and S1 must be handled the way .pdf handles them."""
+
+    @pytest.mark.parametrize("alpha,beta", [(1.5, 0.5), (0.5, 0.5), (1.8, -0.8)])
+    def test_s0_is_s1_shifted(self, alpha, beta):
+        """
+        For alpha != 1 the two conventions differ by beta*tan(pi*alpha/2):
+        F_S0(x) = F_S1(x + beta*tan(pi*alpha/2)).
+        """
+        x = np.linspace(-10, 10, 21)
+        shift = beta * np.tan(np.pi * alpha / 2.0)
+
+        s0 = alpha_stable.with_parametrization("S0").cdf(x, alpha, beta)
+        s1 = alpha_stable.with_parametrization("S1").cdf(x + shift, alpha, beta)
+
+        assert np.max(np.abs(s0 - s1)) < 1e-12
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5, 1.8])
+    def test_conventions_agree_at_zero_skew(self, alpha):
+        """At beta = 0 there is no shift, so S0 and S1 coincide."""
+        x = np.linspace(-10, 10, 21)
+        s0 = alpha_stable.with_parametrization("S0").cdf(x, alpha, 0.0)
+        s1 = alpha_stable.with_parametrization("S1").cdf(x, alpha, 0.0)
+        assert np.max(np.abs(s0 - s1)) < 1e-12
+
+    def test_invalid_parameterization_raises(self):
+        """Only S0 and S1 are accepted."""
+        with pytest.raises(ValueError):
+            alpha_stable.with_parametrization("S2")
