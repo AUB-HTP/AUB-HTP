@@ -1,22 +1,33 @@
 # AUB-HTP
 
-**⚠️ ATTENTION ⚠️ You are currently viewing the unreleased development version of the AUB-HTP codebase. Please find the latest released version of the AUB-HTP codebase v1.0.X [here](https://github.com/AUB-HTP/AUB-HTP/tree/maintenance/v1.0).**
+**⚠️ ATTENTION ⚠️ You are currently viewing the unreleased development version of the AUB-HTP codebase. Please find the latest released version of the AUB-HTP codebase v1.1.X [here](https://github.com/AUB-HTP/AUB-HTP/tree/maintenance/v1.1).**
 
 [![Tests](https://github.com/aub-htp/AUB-HTP/actions/workflows/run-tests.yml/badge.svg)](https://github.com/aub-htp/AUB-HTP/actions/workflows/run-tests.yml)
 
 [![arXiv](https://img.shields.io/badge/arXiv-2606.28530-b31b1b.svg)](https://arxiv.org/abs/2606.28530)
 
-American University of Beirut's Heavy Tails Package (AUB-HTP) aims to provide a modern python toolkit for analyzing Alpha Stable Distributions (also called Levy-Stable distributions)
+American University of Beirut's Heavy Tails Package (AUB-HTP) is a modern python toolkit for analyzing Alpha Stable Distributions (also called Levy-Stable distributions)
 
-As of date, this repository encompasses a **scipy-compatible** frontend to **generate the PDF** as well as **sample random numbers** from a univariate Alpha Stable distribution. Moreover, the package supports sampling from a **multivariate** Alpha Stable distribution.
+AUB-HTP includes:
+- **SciPy compatible** Alpha Stable Distribution:
+    - `aub_htp.alpha_stable.pdf`: Univariate Alpha Stable Probability Density Function (PDF)
+    - `aub_htp.alpha_stable.rvs`: Univariate Alpha Stable Random Number Generator (RNG)
+    - `aub_htp.multivariate_alpha_stable.rvs`: Multivariate Alpha Stable Random Variable Sampling
+- **Scikit-learn compatible** `AlphaStableLinearRegressor`, Linear regressor for Alpha Stable distributed data  
+- **Scikit-learn compatible** [`AlphaStableKMeans` Kmeans clustering for Alpha Stable distributed data](#Kmeans-Clustering-For-Alpha-Stable-Distributed-Data)
+- Robust Alpha Stable statistics:[^1]
+    - `alpha_power`
+    - `alpha_location`
 
-### Installation
+## Installation
 
 ```commandline
 pip install aub-htp
 ```
 
 For alternative installation methods (uv, conda, poetry), see the [installation guide](https://aub-htp.github.io/AUB-HTP/install).
+
+## Usage
 
 ### Univariate Alpha Stable Distributions
 
@@ -160,20 +171,29 @@ samples = ht.multivariate_alpha_stable.rvs(alpha = 0.8, spectral_measure_sampler
 
 ![docs/examples/plot_multivariate_sampling.png](docs/examples/plot_multivariate_sampling.png)
 
+
+### Linear Regressor For Alpha Stable Distributed Data
+
+// TODO: ADD TUTORIAL
+
+### Kmeans Clustering For Alpha Stable Distributed Data
+
+// TODO: ADD TUTORIAL
+
 ### Papers and Further Readings
-[Information Measures, Inequalities and Performance Bounds for Parameter Estimation in Impulsive Noise Environments](https://ieeexplore.ieee.org/document/8231219) (2018)
+[^1]: [Information Measures, Inequalities and Performance Bounds for Parameter Estimation in Impulsive Noise Environments](https://ieeexplore.ieee.org/document/8231219) (2018)
 
 #### Preprints
-[Density Functions and Random Number Generators of α-Stable Distributions](https://arxiv.org/abs/2606.28530) (2026)
+[^2]: [Density Functions and Random Number Generators of α-Stable Distributions](https://arxiv.org/abs/2606.28530) (2026)
 
-[Heavy-Tailed Principal Component Analysis](https://arxiv.org/abs/2603.11308) (2026)
+[^3]: [Heavy-Tailed Principal Component Analysis](https://arxiv.org/abs/2603.11308) (2026)
 
 #### Other References
-[Univariate Stable Distributions Models for Heavy Tailed Data By John P. Nolan](https://doi.org/10.1007/978-3-030-52915-4) (2020)
+[^4]: [Univariate Stable Distributions Models for Heavy Tailed Data By John P. Nolan](https://doi.org/10.1007/978-3-030-52915-4) (2020)
 
-[Multivariate elliptically contoured stable distributions: Theory and estimation](https://www.researchgate.net/publication/241359457_Multivariate_elliptically_contoured_stable_distributions_Theory_and_estimation) (2013)
+[^5]: [Multivariate elliptically contoured stable distributions: Theory and estimation](https://www.researchgate.net/publication/241359457_Multivariate_elliptically_contoured_stable_distributions_Theory_and_estimation) (2013)
 
-[Integral representations of one-dimensional projections for multivariate stable densities](https://www.sciencedirect.com/science/article/pii/S0047259X08001346) (2009)
+[^6]: [Integral representations of one-dimensional projections for multivariate stable densities](https://www.sciencedirect.com/science/article/pii/S0047259X08001346) (2009)
 
-[Multivariate Stable Densities as Functions of One Dimensional Projections](https://www.sciencedirect.com/science/article/pii/S0047259X98917559) (1998)
+[^7]: [Multivariate Stable Densities as Functions of One Dimensional Projections](https://www.sciencedirect.com/science/article/pii/S0047259X98917559) (1998)
 
