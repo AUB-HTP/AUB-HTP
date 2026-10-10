@@ -1,0 +1,396 @@
+<title>Multivariate α-stable density: which method wins where</title>
+<style>
+  :root {
+    --ink:      #16202b;
+    --ink-soft: #47535f;
+    --ink-faint:#7c8794;
+    --paper:    #f7f8fa;
+    --panel:    #ffffff;
+    --rule:     #dde2e8;
+    --proj:     #2d6ca8;
+    --fft:      #b1601f;
+    --tie:      #7c8794;
+    --warn:     #8a6100;
+
+    --serif: "Palatino Linotype", Palatino, "Iowan Old Style", Georgia, serif;
+    --mono:  Consolas, "Cascadia Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+    --sans:  "Segoe UI", system-ui, -apple-system, sans-serif;
+
+    --measure: 72ch;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px 96px; }
+  .col  { max-width: var(--measure); }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding: 64px 0 34px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(30px, 4.4vw, 47px);
+    line-height: 1.1;
+    letter-spacing: -.012em;
+    text-wrap: balance;
+    margin: 0 0 18px;
+    max-width: 30ch;
+  }
+  h1 em { font-style: italic; color: var(--proj); }
+  .standfirst { font-size: 19px; color: var(--ink-soft); margin: 0; max-width: 62ch; }
+
+  /* ---------- verdict ---------- */
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 34px 0 0;
+  }
+  .stat { background: var(--panel); padding: 20px 22px 18px; }
+  .stat-label {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .stat-value {
+    font-family: var(--mono); font-size: 27px; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+    line-height: 1.05; margin: 0 0 8px;
+  }
+  .stat-note { font-size: 14.5px; color: var(--ink-soft); margin: 0; line-height: 1.45; }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 66px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .sec-mark {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--proj); letter-spacing: .1em; padding-top: 6px;
+  }
+  h2 {
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(23px, 2.7vw, 31px);
+    letter-spacing: -.01em; line-height: 1.2;
+    margin: 0; text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--mono); font-weight: 600; font-size: 12px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 38px 0 14px;
+  }
+  p { margin: 0 0 16px; }
+  a { color: var(--proj); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--proj); outline-offset: 2px; }
+
+  code, .m { font-family: var(--mono); font-size: .9em; font-variant-numeric: tabular-nums; }
+  code { background: #eef1f5; padding: .1em .34em; border-radius: 2px; }
+
+  .lede { font-size: 18.5px; color: var(--ink-soft); max-width: 64ch; margin-bottom: 26px; }
+
+  /* ---------- matrix ---------- */
+  .scroller { overflow-x: auto; padding-bottom: 6px; }
+  table.matrix { border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
+  table.matrix th {
+    font-weight: 600; color: var(--ink-faint); font-size: 10.5px;
+    letter-spacing: .1em; text-transform: uppercase; padding: 8px 10px;
+    text-align: center; white-space: nowrap;
+  }
+  table.matrix th.rowh { text-align: right; padding-right: 14px; font-size: 12px;
+                         letter-spacing: .02em; text-transform: none; color: var(--ink); }
+  table.matrix td {
+    width: 92px; height: 54px; text-align: center; vertical-align: middle;
+    border: 1px solid #fff; font-variant-numeric: tabular-nums;
+  }
+  .cell-ratio { font-size: 14px; font-weight: 600; display: block; line-height: 1.15; }
+  .cell-sub   { font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; opacity: .72; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 18px; align-items: center; }
+  .key { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+  .swatch { width: 26px; height: 13px; border: 1px solid rgba(0,0,0,.15); }
+
+  /* ---------- data tables ---------- */
+  table.data { border-collapse: collapse; width: 100%; font-family: var(--mono);
+               font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.data caption {
+    caption-side: top; text-align: left; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+    padding-bottom: 10px;
+  }
+  table.data th {
+    text-align: right; font-weight: 600; font-size: 10.5px; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-faint);
+    border-bottom: 1.5px solid var(--ink); padding: 7px 12px; white-space: nowrap;
+  }
+  table.data th.l, table.data td.l { text-align: left; }
+  table.data td { text-align: right; padding: 7px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  table.data tbody tr:hover { background: #f2f5f8; }
+  .win-proj { color: var(--proj); font-weight: 600; }
+  .win-fft  { color: var(--fft);  font-weight: 600; }
+  .win-tie  { color: var(--tie); }
+  .barnum { color: #7c8794; font-size: 11px; margin-left: 8px; }
+  .bar { display: inline-block; height: 9px; background: var(--fft); opacity: .82; vertical-align: middle; }
+
+  /* ---------- callout ---------- */
+  .callout {
+    background: var(--panel); border-left: 3px solid var(--warn);
+    padding: 20px 24px; margin: 26px 0; max-width: var(--measure);
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout-label {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--warn); margin: 0 0 8px;
+  }
+
+  /* ---------- recommendation ---------- */
+  .rules { display: grid; gap: 1px; background: var(--rule);
+           border: 1px solid var(--rule); margin-top: 8px; }
+  .rule-row { background: var(--panel); display: grid;
+              grid-template-columns: minmax(190px, 260px) 1fr; gap: 0; }
+  .rule-when {
+    font-family: var(--mono); font-size: 12.5px; padding: 16px 18px;
+    border-right: 1px solid var(--rule); color: var(--ink);
+    font-variant-numeric: tabular-nums; background: #fbfcfd;
+  }
+  .rule-do { padding: 16px 20px; font-size: 15.5px; }
+  .rule-do strong { font-family: var(--sans); font-size: 13.5px; letter-spacing: .02em; }
+  .pill {
+    display: inline-block; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: .1em; text-transform: uppercase; padding: 2px 8px;
+    border-radius: 2px; margin-right: 8px; vertical-align: 1px;
+  }
+  .pill-proj { background: rgba(45,108,168,.13); color: var(--proj); }
+  .pill-fft  { background: rgba(177,96,31,.14);  color: var(--fft); }
+  .pill-both { background: rgba(124,135,148,.16); color: #55606c; }
+
+  footer {
+    margin-top: 74px; padding-top: 26px; border-top: 1px solid var(--rule);
+    font-size: 14.5px; color: var(--ink-soft); max-width: var(--measure);
+  }
+  footer h3 { margin-top: 0; }
+  ul { margin: 0 0 16px; padding-left: 1.2em; }
+  li { margin-bottom: 7px; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">aub-htp · pdf_compare · meta-study</p>
+    <h1>Two ways to compute a multivariate α-stable density, and <em>where each one wins</em></h1>
+    <p class="standfirst">
+      A one-dimensional-projection integral and an inverse-FFT of the characteristic
+      function, measured against an exact reference across fifty points of the
+      α–β plane — plus the cost crossover that decides the rest.
+    </p>
+  </header>
+
+  <div class="verdict">
+    <div class="stat">
+      <p class="stat-label">Accuracy, 50 cells</p>
+      <p class="stat-value"><span class="win-proj">37</span> · <span class="win-tie">13</span> · <span class="win-fft">0</span></p>
+      <p class="stat-note">Projection wins or ties everywhere. It never loses a cell.</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Projection error</p>
+      <p class="stat-value">~1&times;10<sup>-4</sup></p>
+      <p class="stat-note">Essentially flat across the whole plane; worst cell 3.9&times;10<sup>-3</sup>.</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Worst FFT cell</p>
+      <p class="stat-value">5.59%</p>
+      <p class="stat-note">At α=0.4, β=0.75 — 626&times; the projection error in the same cell.</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Cost crossover, d=2</p>
+      <p class="stat-value">~10<sup>4</sup>–10<sup>5</sup></p>
+      <p class="stat-note">Query points beyond which the FFT's fixed build pays off.</p>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-head"><span class="sec-mark">A</span><h2>Accuracy over the α–β plane</h2></div>
+    <div class="col">
+      <p class="lede">
+        Measured in one dimension, the only setting with an <em>exact</em> reference for
+        every β: a spectral measure with atoms at ±1 realises a univariate S1 law, so the
+        package's independent <code>alpha_stable.pdf</code> is ground truth. That also makes
+        the projection method's sphere quadrature exact, isolating the two density kernels.
+      </p>
+      <p>
+        Each cell reports how many times <strong>worse</strong> the losing method is. The
+        pattern is clean and one-directional: the projection error does not care about
+        either parameter, while the FFT error is governed almost entirely by α and
+        barely at all by β.
+      </p>
+    </div>
+
+    <div class="scroller">
+      <table class="matrix"><thead><tr><th class="rowh">&alpha; \ &beta;</th><th>0.00</th><th>0.25</th><th>0.50</th><th>0.75</th><th>1.00</th></tr></thead><tbody><tr><th class="rowh">1.95</th><td style="background:rgba(124,135,148,0.130);color:#55606c" title="alpha=1.95, beta=0.0 &mdash; projection 6.4e-05, FFT 9.6e-05"><span class="cell-ratio">1.5&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.128);color:#55606c" title="alpha=1.95, beta=0.25 &mdash; projection 5.6e-05, FFT 8.2e-05"><span class="cell-ratio">1.5&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.154);color:#55606c" title="alpha=1.95, beta=0.5 &mdash; projection 5.4e-05, FFT 1.0e-04"><span class="cell-ratio">1.9&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.126);color:#55606c" title="alpha=1.95, beta=0.75 &mdash; projection 5.8e-05, FFT 8.4e-05"><span class="cell-ratio">1.4&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.149);color:#55606c" title="alpha=1.95, beta=1.0 &mdash; projection 5.3e-05, FFT 9.6e-05"><span class="cell-ratio">1.8&times;</span><span class="cell-sub">tie</span></td></tr><tr><th class="rowh">1.80</th><td style="background:rgba(124,135,148,0.107);color:#55606c" title="alpha=1.8, beta=0.0 &mdash; projection 9.5e-05, FFT 1.1e-04"><span class="cell-ratio">1.1&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.107);color:#55606c" title="alpha=1.8, beta=0.25 &mdash; projection 9.1e-05, FFT 1.0e-04"><span class="cell-ratio">1.1&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.103);color:#55606c" title="alpha=1.8, beta=0.5 &mdash; projection 9.6e-05, FFT 1.0e-04"><span class="cell-ratio">1.1&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.100);color:#55606c" title="alpha=1.8, beta=0.75 &mdash; projection 8.8e-05, FFT 8.9e-05"><span class="cell-ratio">1.0&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(124,135,148,0.111);color:#55606c" title="alpha=1.8, beta=1.0 &mdash; projection 9.8e-05, FFT 8.2e-05"><span class="cell-ratio">1.2&times;</span><span class="cell-sub">tie</span></td></tr><tr><th class="rowh">1.50</th><td style="background:rgba(124,135,148,0.136);color:#55606c" title="alpha=1.5, beta=0.0 &mdash; projection 1.7e-04, FFT 2.8e-04"><span class="cell-ratio">1.6&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(45,108,168,0.219);color:#1d4f7d" title="alpha=1.5, beta=0.25 &mdash; projection 1.5e-04, FFT 3.1e-04"><span class="cell-ratio">2&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.226);color:#1d4f7d" title="alpha=1.5, beta=0.5 &mdash; projection 1.4e-04, FFT 3.0e-04"><span class="cell-ratio">2&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.253);color:#1d4f7d" title="alpha=1.5, beta=0.75 &mdash; projection 9.7e-05, FFT 2.7e-04"><span class="cell-ratio">3&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.242);color:#1d4f7d" title="alpha=1.5, beta=1.0 &mdash; projection 9.4e-05, FFT 2.4e-04"><span class="cell-ratio">2&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">1.20</th><td style="background:rgba(45,108,168,0.442);color:#1d4f7d" title="alpha=1.2, beta=0.0 &mdash; projection 1.5e-04, FFT 2.2e-03"><span class="cell-ratio">15&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.430);color:#1d4f7d" title="alpha=1.2, beta=0.25 &mdash; projection 1.3e-04, FFT 1.8e-03"><span class="cell-ratio">14&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.403);color:#1d4f7d" title="alpha=1.2, beta=0.5 &mdash; projection 1.2e-04, FFT 1.3e-03"><span class="cell-ratio">11&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.409);color:#1d4f7d" title="alpha=1.2, beta=0.75 &mdash; projection 9.0e-05, FFT 1.0e-03"><span class="cell-ratio">11&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.464);color:#1d4f7d" title="alpha=1.2, beta=1.0 &mdash; projection 4.9e-05, FFT 9.0e-04"><span class="cell-ratio">18&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">1.05</th><td style="background:rgba(45,108,168,0.520);color:#1d4f7d" title="alpha=1.05, beta=0.0 &mdash; projection 1.6e-04, FFT 4.9e-03"><span class="cell-ratio">31&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.492);color:#1d4f7d" title="alpha=1.05, beta=0.25 &mdash; projection 1.5e-04, FFT 3.5e-03"><span class="cell-ratio">24&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.292);color:#1d4f7d" title="alpha=1.05, beta=0.5 &mdash; projection 8.1e-04, FFT 3.2e-03"><span class="cell-ratio">4&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(124,135,148,0.121);color:#55606c" title="alpha=1.05, beta=0.75 &mdash; projection 3.9e-03, FFT 2.9e-03"><span class="cell-ratio">1.4&times;</span><span class="cell-sub">tie</span></td><td style="background:rgba(45,108,168,0.352);color:#1d4f7d" title="alpha=1.05, beta=1.0 &mdash; projection 3.5e-04, FFT 2.4e-03"><span class="cell-ratio">7&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">1.00</th><td style="background:rgba(45,108,168,0.557);color:#ffffff" title="alpha=1.0, beta=0.0 &mdash; projection 1.4e-04, FFT 6.1e-03"><span class="cell-ratio">43&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.522);color:#1d4f7d" title="alpha=1.0, beta=0.25 &mdash; projection 1.4e-04, FFT 4.5e-03"><span class="cell-ratio">31&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.500);color:#1d4f7d" title="alpha=1.0, beta=0.5 &mdash; projection 1.3e-04, FFT 3.4e-03"><span class="cell-ratio">26&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.478);color:#1d4f7d" title="alpha=1.0, beta=0.75 &mdash; projection 1.3e-04, FFT 2.7e-03"><span class="cell-ratio">21&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.444);color:#1d4f7d" title="alpha=1.0, beta=1.0 &mdash; projection 1.2e-04, FFT 1.9e-03"><span class="cell-ratio">15&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">0.95</th><td style="background:rgba(45,108,168,0.595);color:#ffffff" title="alpha=0.95, beta=0.0 &mdash; projection 1.3e-04, FFT 7.6e-03"><span class="cell-ratio">60&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.432);color:#1d4f7d" title="alpha=0.95, beta=0.25 &mdash; projection 4.0e-04, FFT 5.5e-03"><span class="cell-ratio">14&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.301);color:#1d4f7d" title="alpha=0.95, beta=0.5 &mdash; projection 9.0e-04, FFT 3.8e-03"><span class="cell-ratio">4&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.299);color:#1d4f7d" title="alpha=0.95, beta=0.75 &mdash; projection 8.7e-04, FFT 3.6e-03"><span class="cell-ratio">4&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(124,135,148,0.150);color:#55606c" title="alpha=0.95, beta=1.0 &mdash; projection 1.4e-03, FFT 2.5e-03"><span class="cell-ratio">1.8&times;</span><span class="cell-sub">tie</span></td></tr><tr><th class="rowh">0.80</th><td style="background:rgba(45,108,168,0.674);color:#ffffff" title="alpha=0.8, beta=0.0 &mdash; projection 1.2e-04, FFT 1.5e-02"><span class="cell-ratio">122&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.662);color:#ffffff" title="alpha=0.8, beta=0.25 &mdash; projection 1.0e-04, FFT 1.1e-02"><span class="cell-ratio">109&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.606);color:#ffffff" title="alpha=0.8, beta=0.5 &mdash; projection 1.3e-04, FFT 8.5e-03"><span class="cell-ratio">66&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.504);color:#1d4f7d" title="alpha=0.8, beta=0.75 &mdash; projection 2.5e-04, FFT 6.7e-03"><span class="cell-ratio">26&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.460);color:#1d4f7d" title="alpha=0.8, beta=1.0 &mdash; projection 2.7e-04, FFT 4.8e-03"><span class="cell-ratio">18&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">0.60</th><td style="background:rgba(45,108,168,0.793);color:#ffffff" title="alpha=0.6, beta=0.0 &mdash; projection 1.0e-04, FFT 3.6e-02"><span class="cell-ratio">357&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.772);color:#ffffff" title="alpha=0.6, beta=0.25 &mdash; projection 1.0e-04, FFT 3.0e-02"><span class="cell-ratio">295&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.735);color:#ffffff" title="alpha=0.6, beta=0.5 &mdash; projection 1.1e-04, FFT 2.3e-02"><span class="cell-ratio">212&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.703);color:#ffffff" title="alpha=0.6, beta=0.75 &mdash; projection 1.2e-04, FFT 1.8e-02"><span class="cell-ratio">158&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.651);color:#ffffff" title="alpha=0.6, beta=1.0 &mdash; projection 1.4e-04, FFT 1.4e-02"><span class="cell-ratio">99&times;</span><span class="cell-sub">proj</span></td></tr><tr><th class="rowh">0.40</th><td style="background:rgba(45,108,168,0.846);color:#ffffff" title="alpha=0.4, beta=0.0 &mdash; projection 7.8e-05, FFT 4.5e-02"><span class="cell-ratio">572&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.836);color:#ffffff" title="alpha=0.4, beta=0.25 &mdash; projection 8.7e-05, FFT 4.6e-02"><span class="cell-ratio">526&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.845);color:#ffffff" title="alpha=0.4, beta=0.5 &mdash; projection 9.2e-05, FFT 5.2e-02"><span class="cell-ratio">566&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.856);color:#ffffff" title="alpha=0.4, beta=0.75 &mdash; projection 8.9e-05, FFT 5.6e-02"><span class="cell-ratio">626&times;</span><span class="cell-sub">proj</span></td><td style="background:rgba(45,108,168,0.826);color:#ffffff" title="alpha=0.4, beta=1.0 &mdash; projection 1.0e-04, FFT 4.8e-02"><span class="cell-ratio">477&times;</span><span class="cell-sub">proj</span></td></tr></tbody></table>
+    </div>
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:#2d6ca8"></span>projection more accurate</span>
+      <span class="key"><span class="swatch" style="background:#dfe3e7"></span>tie (&lt;2&times;)</span>
+      <span class="key"><span class="swatch" style="background:#b1601f"></span>FFT more accurate</span>
+      <span class="key">saturation ∝ log of the error ratio</span>
+    </div>
+
+    <h3>Why: the FFT is resolution-limited exactly where the density is hardest</h3>
+    <div class="col">
+      <p>
+        Small α means a sharp peak <em>and</em> a heavy tail, so a single grid must be fine
+        and wide at once. The point-wise method has no grid and is untouched by this.
+        Averaged across β, the FFT error falls by a factor of ~500 from α=0.4 to α=1.95,
+        where the two methods become indistinguishable.
+      </p>
+    </div>
+    <div class="scroller">
+      <table class="data"><caption>Mean error across &beta;, by &alpha;</caption><thead><tr><th class="l">&alpha;</th><th>projection</th><th>inverse FFT</th><th class="l">FFT error, to scale</th></tr></thead><tbody><tr><td class="l">0.40</td><td class="win-proj">8.9&times;10<sup>-5</sup></td><td class="win-fft">4.9&times;10<sup>-2</sup></td><td class="l"><span class="bar" style="width:230px"></span><span class="barnum">4.93%</span></td></tr><tr><td class="l">0.60</td><td class="win-proj">1.1&times;10<sup>-4</sup></td><td class="win-fft">2.4&times;10<sup>-2</sup></td><td class="l"><span class="bar" style="width:113px"></span><span class="barnum">2.42%</span></td></tr><tr><td class="l">0.80</td><td class="win-proj">1.8&times;10<sup>-4</sup></td><td class="win-fft">9.2&times;10<sup>-3</sup></td><td class="l"><span class="bar" style="width:43px"></span><span class="barnum">0.92%</span></td></tr><tr><td class="l">0.95</td><td class="win-proj">7.3&times;10<sup>-4</sup></td><td class="win-fft">4.6&times;10<sup>-3</sup></td><td class="l"><span class="bar" style="width:22px"></span><span class="barnum">0.46%</span></td></tr><tr><td class="l">1.00</td><td class="win-proj">1.3&times;10<sup>-4</sup></td><td class="win-fft">3.7&times;10<sup>-3</sup></td><td class="l"><span class="bar" style="width:17px"></span><span class="barnum">0.37%</span></td></tr><tr><td class="l">1.05</td><td class="win-proj">1.1&times;10<sup>-3</sup></td><td class="win-fft">3.4&times;10<sup>-3</sup></td><td class="l"><span class="bar" style="width:16px"></span><span class="barnum">0.34%</span></td></tr><tr><td class="l">1.20</td><td class="win-proj">1.1&times;10<sup>-4</sup></td><td class="win-fft">1.4&times;10<sup>-3</sup></td><td class="l"><span class="bar" style="width:7px"></span><span class="barnum">0.14%</span></td></tr><tr><td class="l">1.50</td><td class="win-proj">1.3&times;10<sup>-4</sup></td><td class="win-fft">2.8&times;10<sup>-4</sup></td><td class="l"><span class="bar" style="width:2px"></span><span class="barnum">0.03%</span></td></tr><tr><td class="l">1.80</td><td class="win-proj">9.4&times;10<sup>-5</sup></td><td class="win-fft">9.6&times;10<sup>-5</sup></td><td class="l"><span class="bar" style="width:2px"></span><span class="barnum">0.01%</span></td></tr><tr><td class="l">1.95</td><td class="win-proj">5.7&times;10<sup>-5</sup></td><td class="win-fft">9.2&times;10<sup>-5</sup></td><td class="l"><span class="bar" style="width:2px"></span><span class="barnum">0.01%</span></td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-mark">B</span><h2>Cost, and where it flips</h2></div>
+    <div class="col">
+      <p class="lede">
+        Both methods now have a build phase and an evaluation phase, but they balance
+        them oppositely. The projection method tabulates its kernel once and then costs
+        <span class="m">~120&nbsp;µs</span> per point. The FFT inverts a whole grid up
+        front and then interpolates for almost nothing.
+      </p>
+      <p>
+        So the projection method is <em>cheaper</em> for modest query counts — its build is
+        the smaller of the two — and the FFT only pays off once the point count amortises
+        its grid. In d=2 the crossover sits between 10<sup>4</sup> and 10<sup>5</sup> points.
+      </p>
+    </div>
+    <div class="scroller">
+      <table class="data"><caption>d=2 &mdash; total time ratio, projection &divide; FFT (build + evaluate)</caption><thead><tr><th class="l">&alpha;</th><th>FFT build</th><th>proj build</th><th>n=100</th><th>n=1,000</th><th>n=10,000</th><th>n=100,000</th></tr></thead><tbody><tr><td class="l">0.6</td><td>5.25 s</td><td>1.95 s</td><td class="win-proj">0.37</td><td class="win-proj">0.39</td><td class="win-proj">0.60</td><td class="win-fft">2.71</td></tr><tr><td class="l">1.0</td><td>2.71 s</td><td>1.04 s</td><td class="win-proj">0.39</td><td class="win-proj">0.43</td><td class="win-proj">0.83</td><td class="win-fft">5.04</td></tr><tr><td class="l">1.5</td><td>4.84 s</td><td>3.27 s</td><td class="win-proj">0.68</td><td class="win-proj">0.70</td><td class="win-proj">0.96</td><td class="win-fft">3.18</td></tr></tbody></table>
+    </div>
+    <div class="col">
+      <p style="margin-top:18px">
+        Ratios below <span class="m">1.00</span> favour the projection method. Note this is
+        after a <strong>~1000&times;</strong> reduction in its per-point cost: the same
+        workload that took <span class="m">140&nbsp;ms</span> per point now takes
+        <span class="m">120&nbsp;µs</span>.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-mark">C</span><h2>A failure mode both methods share</h2></div>
+    <div class="col">
+      <p class="lede">
+        The most useful result here is not about either method. Near α=1 the S1
+        characteristic function multiplies the skewness by <span class="m">tan(πα/2)</span>,
+        which diverges. Monte-Carlo error in the <em>estimated</em> skewness is amplified by
+        that same factor, so both methods degrade in lockstep.
+      </p>
+    </div>
+
+    <div class="scroller">
+      <table class="data"><caption>Symmetric law (true &beta; = 0): measured skew, its amplification, and the resulting error</caption><thead><tr><th class="l">&alpha;</th><th>tan(&pi;&alpha;/2)</th><th class="l">sampler</th><th>N</th><th>measured &beta;&#770;</th><th>&beta;&#770; &middot; tan</th><th>projection</th><th>FFT</th></tr></thead><tbody><tr><td class="l">0.90</td><td>6.31</td><td class="l">antithetic</td><td>any</td><td>0.00000</td><td class="amp">0.0000</td><td class="win-proj">0.01%</td><td class="win-proj">0.19%</td></tr><tr><td class="l">0.90</td><td>6.31</td><td class="l">i.i.d.</td><td>2,000</td><td>0.00700</td><td class="amp">0.0442</td><td class="win-fft">3.50%</td><td class="win-fft">3.59%</td></tr><tr><td class="l">0.90</td><td>6.31</td><td class="l">i.i.d.</td><td>50,000</td><td>0.00112</td><td class="amp">0.0071</td><td class="win-proj">0.56%</td><td class="win-proj">0.65%</td></tr><tr><td class="l">0.95</td><td>12.71</td><td class="l">antithetic</td><td>any</td><td>0.00000</td><td class="amp">0.0000</td><td class="win-proj">0.01%</td><td class="win-proj">0.14%</td></tr><tr><td class="l">0.95</td><td>12.71</td><td class="l">i.i.d.</td><td>2,000</td><td>0.00700</td><td class="amp">0.0889</td><td class="win-fft">6.59%</td><td class="win-fft">6.64%</td></tr><tr><td class="l">0.95</td><td>12.71</td><td class="l">i.i.d.</td><td>50,000</td><td>0.00112</td><td class="amp">0.0142</td><td class="win-proj">1.07%</td><td class="win-proj">1.20%</td></tr><tr><td class="l">0.99</td><td>63.66</td><td class="l">antithetic</td><td>any</td><td>0.00000</td><td class="amp">0.0000</td><td class="win-proj">0.01%</td><td class="win-proj">0.11%</td></tr><tr><td class="l">0.99</td><td>63.66</td><td class="l">i.i.d.</td><td>2,000</td><td>0.00700</td><td class="amp">0.4456</td><td class="win-fft">31.02%</td><td class="win-fft">31.07%</td></tr><tr><td class="l">0.99</td><td>63.66</td><td class="l">i.i.d.</td><td>50,000</td><td>0.00112</td><td class="amp">0.0713</td><td class="win-fft">5.08%</td><td class="win-fft">5.10%</td></tr><tr><td class="l">1.00</td><td>&infin;</td><td class="l">antithetic</td><td>any</td><td>0.00000</td><td class="amp">&mdash;</td><td class="win-proj">0.01%</td><td class="win-proj">0.10%</td></tr><tr><td class="l">1.00</td><td>&infin;</td><td class="l">i.i.d.</td><td>2,000</td><td>0.00700</td><td class="amp">&mdash;</td><td class="win-proj">0.43%</td><td class="win-proj">0.37%</td></tr><tr><td class="l">1.00</td><td>&infin;</td><td class="l">i.i.d.</td><td>50,000</td><td>0.00112</td><td class="amp">&mdash;</td><td class="win-proj">0.07%</td><td class="win-proj">0.09%</td></tr></tbody></table>
+    </div>
+
+    <div class="callout">
+      <p class="callout-label">Practical consequence</p>
+      <p>
+        At α=0.99 an i.i.d. symmetric sampler with 2,000 draws produces a spurious skew of
+        <span class="m">0.007</span>, which <span class="m">tan(πα/2)=63.7</span> turns into
+        a <span class="m">31%</span> density error in <em>both</em> methods. Raising the
+        sample count 25× only reduces it to <span class="m">5%</span> — the decay is
+        <span class="m">1/√N</span>.
+      </p>
+      <p>
+        Do not spend samples on this. An antithetic sampler makes the empirical skew exactly
+        zero and the error vanishes at every sample count. α=1 <em>itself</em> is safe: that
+        branch uses the <span class="m">(2/π)β·u·log u</span> form and has no
+        <span class="m">tan</span> to amplify.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-mark">→</span><h2>Which to use</h2></div>
+    <div class="rules">
+      <div class="rule-row">
+        <div class="rule-when">α ≲ 1.2 &nbsp;·&nbsp; any β</div>
+        <div class="rule-do"><span class="pill pill-proj">projection</span>
+          The FFT is 15–626× less accurate here, and for α&lt;0.8 it cannot reach 1% on a
+          practical grid.</div>
+      </div>
+      <div class="rule-row">
+        <div class="rule-when">α ≳ 1.8 &nbsp;·&nbsp; any β</div>
+        <div class="rule-do"><span class="pill pill-both">either</span>
+          Accuracy is indistinguishable (both ~1×10<sup>-4</sup>). Decide on workload alone.</div>
+      </div>
+      <div class="rule-row">
+        <div class="rule-when">≳ 10<sup>5</sup> points, or a full grid</div>
+        <div class="rule-do"><span class="pill pill-fft">inverse FFT</span>
+          3–5× cheaper end-to-end once the grid is amortised, and it returns the whole
+          grid natively.</div>
+      </div>
+      <div class="rule-row">
+        <div class="rule-when">≲ 10<sup>4</sup> scattered points</div>
+        <div class="rule-do"><span class="pill pill-proj">projection</span>
+          Smaller build and no grid to size; also more accurate, so there is no trade.</div>
+      </div>
+      <div class="rule-row">
+        <div class="rule-when">α = 2</div>
+        <div class="rule-do"><span class="pill pill-fft">inverse FFT</span>
+          The projection kernel is singular (<span class="m">tan(πα/2)</span> diverges) and
+          the model refuses the value. Better still, use the exact Gaussian with
+          <span class="m">Σ = 2·mass·E[VVᵀ]</span>.</div>
+      </div>
+      <div class="rule-row">
+        <div class="rule-when">α near 1, with skew</div>
+        <div class="rule-do"><span class="pill pill-both">fix the sampler</span>
+          Neither method can help. Use a symmetry-respecting (antithetic) spectral
+          sampler — see section C.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <h3>How this was measured</h3>
+    <ul>
+      <li><strong>Section A</strong> — d=1, exact univariate reference, 8,000 spectral samples,
+          antithetic sampler so the empirical skew is exact. Error is the median relative
+          error over the bulk (reference above 2% of its peak); the far tail is excluded
+          because <code>alpha_stable.pdf</code> truncates its tails to zero.</li>
+      <li><strong>Section B</strong> — d=2 isotropic, 8,000 spectral samples, FFT grid
+          101² at dt=0.3, projection with 360 sphere nodes. Times are single-run wall clock
+          on one machine; treat them as ratios, not absolutes.</li>
+      <li><strong>Section C</strong> — symmetric law, so the true β is 0 and any measured
+          skew is pure sampling error.</li>
+    </ul>
+    <h3>Caveats</h3>
+    <ul>
+      <li>Section A is one-dimensional by necessity — it is the only place an exact
+          reference exists for every β. The d=2 cross-checks live in the test suite.</li>
+      <li>The FFT numbers depend on grid choices. Each cell was sized from the reference's
+          own bulk, so they are reasonable rather than tuned per cell.</li>
+      <li>Reproduce with <code>python -m pdf_compare.meta_study</code>; raw numbers are
+          written to <code>pdf_compare/results/meta_study.json</code>.</li>
+    </ul>
+  </footer>
+</div>
