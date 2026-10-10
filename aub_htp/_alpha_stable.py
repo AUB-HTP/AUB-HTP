@@ -8,8 +8,6 @@ from scipy.stats._multivariate import multi_rv_generic
 from scipy.stats._distn_infrastructure import _ShapeInfo
 
 from .pdf import generate_alpha_stable_pdf
-from .pdf.multivariate import get_pdf_model
-from .cdf import generate_alpha_stable_cdf
 from .random import sample_alpha_stable_vector, IsotropicSampler, UnivariateSampler, EllipticSampler, DiscreteSampler, BaseSpectralMeasureSampler
 from .random.cms_univariate_sampler import sample_cms
 from .random.alpha_stable_sampler import estimate_number_of_convergence_terms
@@ -85,55 +83,6 @@ class alpha_stable_gen(rv_continuous):
             ])
 
         return pdf.reshape(size)
-
-    @inherit_docstring_from(rv_continuous)
-    def cdf(self, x, *args, **kwds):
-        # override base class version to correct location for S1 parameterization
-        (alpha, beta), delta, gamma = self._parse_args(*args, **kwds)
-        (x, alpha, beta, delta, gamma), size = _sanitize_array_args(x, alpha, beta, delta, gamma)
-        if size == (0,):
-            return np.array([])
-
-        if np.all(alpha == alpha[0]) \
-        and np.all(beta == beta[0]) \
-        and np.all(delta == delta[0]) \
-        and np.all(gamma == gamma[0]):
-            alpha_, beta_, delta_, gamma_ = alpha[0], beta[0], delta[0], gamma[0]
-            return super().cdf(
-                x,
-                alpha_,
-                beta_,
-                loc = self._get_shift_term(alpha_, beta_, gamma_, delta_, self.parameterization),
-                scale = gamma_
-            ).reshape(size)
-        else:
-            cdf = [
-                super(self.__class__, self).cdf(
-                    x_,
-                    alpha_,
-                    beta_,
-                    loc = self._get_shift_term(alpha_, beta_, gamma_, delta_, self.parameterization),
-                    scale = gamma_
-                ) for x_, alpha_, beta_, delta_, gamma_ in zip(x, alpha, beta, delta, gamma)
-            ]
-            return np.asarray(cdf).reshape(size)
-
-    def _cdf(self, x, alpha, beta):
-        (x, alpha, beta), size = _sanitize_array_args(x, alpha, beta)
-        if size == (0,):
-            return np.array([])
-
-        cdf: np.ndarray
-        if np.all(alpha == alpha[0]) and np.all(beta == beta[0]):
-            cdf = generate_alpha_stable_cdf(x, alpha[0], beta[0], 1, 0)
-
-        else:
-            cdf = np.array([
-                generate_alpha_stable_cdf(xi, ai, bi, 1, 0)
-                for xi, ai, bi in zip(x, alpha, beta)
-            ])
-
-        return cdf.reshape(size)
 
     def _argcheck(self, alpha, beta):
         return (0 < alpha) & (alpha <= 2) & (-1 <= beta) & (beta <= 1)
@@ -239,9 +188,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
     Multivariate alpha stable distribution generator.
 
     This class provides the SciPy-compatible `rvs` interface for sampling
-    multivariate alpha-stable law, and a `pdf` wrapper that caches the last
-    computed density model so repeated evaluations reuse expensive internal
-    precomputations.
+    multivariate alpha-stable law
     """
     def __init__(self, seed=None):
         super().__init__(seed)
@@ -296,43 +243,6 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         if size is None:
             return samples[0]
         return samples
-
-    def pdf(
-        self,
-        x: npt.ArrayLike,
-        alpha: float,
-        spectral_measure_sampler: BaseSpectralMeasureSampler | Literal[
-            "standard_isotropic_2d", "standard_isotropic_3d",
-            "1x2_elliptic_2d", "1x2x4_elliptic_3d", "coin_flip_discrete"
-        ] = "standard_isotropic_2d",
-        shift: npt.ArrayLike = 0.0,
-        number_of_spectral_samples: int = 200_000,
-        number_of_sphere_points: int | None = None,
-        random_state: None | int | np.random.RandomState | np.random.Generator = None,
-        exact: bool = False,
-        sphere_method: str = "sobol",
-        antipodal: bool = False,
-    ) -> npt.NDArray:
-        """Evaluate the multivariate alpha-stable density at point(s) x.
-
-        The method reuses the last computed internal density model when the
-        pdf parameters are identical to the previous call. This preserves the
-        costly `MultivariateStableDensity` setup for repeated evaluations.
-        """
-        sampler = self._check_spectral_measure_sampler(
-            alpha, spectral_measure_sampler)
-        model = get_pdf_model(
-            alpha,
-            sampler,
-            shift,
-            number_of_spectral_samples,
-            number_of_sphere_points,
-            random_state,
-            exact,
-            sphere_method,
-            antipodal,
-        )
-        return model.pdf(x)
 
     def _check_spectral_measure_sampler(self, alpha: float, spectral_measure_sampler: BaseSpectralMeasureSampler | str) -> BaseSpectralMeasureSampler:
         if isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler):
