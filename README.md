@@ -174,11 +174,70 @@ samples = ht.multivariate_alpha_stable.rvs(alpha = 0.8, spectral_measure_sampler
 
 ### Linear Regressor For Alpha Stable Distributed Data
 
-// TODO: ADD TUTORIAL
+`AlphaStableLinearRegressor` is built for data with alpha stable noise, where ordinary least squares would get thrown off by outliers.
+
+Example: Linear regression with alpha-stable noise.
+
+```python
+import aub_htp as ht
+import numpy as np
+from aub_htp.machine_learning import AlphaStableLinearRegressor
+from sklearn.linear_model import LinearRegression
+
+x = np.linspace(0, 10, 320)
+noise = ht.alpha_stable.rvs(alpha = 0.8, beta = 0, loc = 0, scale = 1, size = 320, random_state = 38)
+y = 3 * x + 2 + noise
+X = x.reshape(-1, 1)
+
+ols = LinearRegression().fit(X, y)
+alpha_stable = AlphaStableLinearRegressor(alpha = 0.8).fit(X, y)
+
+print(f"LinearRegression:           y = {ols.coef_[0]:.2f}x + {ols.intercept_:.2f}")
+print(f"AlphaStableLinearRegressor: y = {alpha_stable.coef_[0, 0]:.2f}x + {alpha_stable.intercept_[0]:.2f}")
+# --------------------------------------------------------------------
+# LinearRegression:           y = 3.58x + -3.06
+# AlphaStableLinearRegressor: y = 3.01x + 1.90
+```
+
+![docs/examples/plot_linear_regression.png](docs/examples/plot_linear_regression.png)
 
 ### Kmeans Clustering For Alpha Stable Distributed Data
 
-// TODO: ADD TUTORIAL
+`AlphaStableKMeans` is built for clustering data with alpha stable noise, where standard Kmeans gets pulled around by outliers.
+
+Example: Clustering three groups of points with alpha-stable noise.
+
+```python
+import aub_htp as ht
+import numpy as np
+from aub_htp.machine_learning import AlphaStableKMeans
+from sklearn.cluster import KMeans
+
+true_centers = np.array([[0, 0], [15, 15], [-15, 15]])
+X = np.vstack([
+    center + ht.multivariate_alpha_stable.rvs(alpha = 1.0, spectral_measure_sampler = "standard_isotropic_2d", size = 100, random_state = 38 + i)
+    for i, center in enumerate(true_centers)
+])
+
+kmeans = KMeans(n_clusters = 3, n_init = 10, random_state = 38).fit(X)
+alpha_stable = AlphaStableKMeans(n_clusters = 3, alpha = 1.0).fit(X)
+
+print("KMeans centers:")
+print(np.round(kmeans.cluster_centers_, 2))
+print("AlphaStableKMeans centers:")
+print(np.round(alpha_stable.cluster_centers_, 2))
+# --------------------------------------------------------------------
+# KMeans centers:
+# [[ 17.21  16.43]
+#  [-15.75  15.56]
+#  [ -0.33  -0.15]]
+# AlphaStableKMeans centers:
+# [[-15.07  14.91]
+#  [ -0.2   -0.13]
+#  [ 15.33  15.25]]
+```
+
+![docs/examples/plot_kmeans.png](docs/examples/plot_kmeans.png)
 
 ### Papers and Further Readings
 [Information Measures, Inequalities and Performance Bounds for Parameter Estimation in Impulsive Noise Environments](https://ieeexplore.ieee.org/document/8231219) (2018)
