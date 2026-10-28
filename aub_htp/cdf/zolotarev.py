@@ -29,13 +29,15 @@ def generate_cdf_one_point(x, alpha, beta):
         if beta < 0:
             return 1.0 - generate_cdf_one_point(-x, 1, -beta)
 
-        theta0 = np.pi / 2
-        U = calculate_V(1, beta, theta0)
-
-        integrand = lambda theta: np.exp(
-            -np.exp(-x / beta) * (np.pi / 2) * U(theta)
+        log_g = lambda theta: (
+            np.log(2 / np.pi)
+            + np.log((np.pi / 2 + beta * theta) / np.cos(theta))
+            + (np.pi / 2 + beta * theta) * np.tan(theta) / beta
+            + (-x / beta) * (np.pi / 2)
         )
-
+        
+        integrand = lambda theta: np.exp(-np.exp(log_g(theta)))
+        
         value, _ = quad(
             integrand,
             -np.pi / 2,
