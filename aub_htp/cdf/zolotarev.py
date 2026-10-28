@@ -52,6 +52,8 @@ def generate_cdf_one_point(x, alpha, beta):
         return 1.0 - generate_cdf_one_point(-x, alpha, -beta)
 
     theta0 = theta0_stable(alpha, beta)
+    if x == 0:
+            return 0.5 - theta0 / np.pi
     U = calculate_V(alpha, beta, theta0)
 
     exponent = alpha / (alpha - 1)
@@ -68,7 +70,7 @@ def generate_cdf_one_point(x, alpha, beta):
     )
 
     if alpha < 1:
-        return (1 - beta) / 2 + value / np.pi
+        return 0.5 - theta0 / np.pi + value / np.pi
     else:
         return 1 - value / np.pi
 
