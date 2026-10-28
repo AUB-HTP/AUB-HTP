@@ -33,7 +33,7 @@ def generate_cdf_one_point(x, alpha, beta):
         U = calculate_V(1, beta, theta0)
 
         integrand = lambda theta: np.exp(
-            -np.exp(-x / beta) * (np.pi / 2) * U(theta)
+            -np.exp((-x / beta) * (np.pi / 2)) * U(theta)
         )
 
         value, _ = quad(
