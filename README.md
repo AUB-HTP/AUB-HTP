@@ -240,13 +240,13 @@ print(np.round(alpha_stable.cluster_centers_, 2))
 ![docs/examples/plot_kmeans.png](docs/examples/plot_kmeans.png)
 
 ### Papers and Further Readings
+[Density Functions and Random Number Generators of α-Stable Distributions](https://proceedings.scipy.org/articles/eykk7863) (2026)
+[^2]: [Density Functions and Random Number Generators of α-Stable Distributions](https://proceedings.scipy.org/articles/eykk7863) (2026)
+
 [Information Measures, Inequalities and Performance Bounds for Parameter Estimation in Impulsive Noise Environments](https://ieeexplore.ieee.org/document/8231219) (2018)
 [^1]: [Information Measures, Inequalities and Performance Bounds for Parameter Estimation in Impulsive Noise Environments](https://ieeexplore.ieee.org/document/8231219) (2018)
 
 #### Preprints
-[Density Functions and Random Number Generators of α-Stable Distributions](https://arxiv.org/abs/2606.28530) (2026)
-[^2]: [Density Functions and Random Number Generators of α-Stable Distributions](https://arxiv.org/abs/2606.28530) (2026)
-
 [Heavy-Tailed Principal Component Analysis](https://arxiv.org/abs/2603.11308) (2026)
 [^3]: [Heavy-Tailed Principal Component Analysis](https://arxiv.org/abs/2603.11308) (2026)
 
