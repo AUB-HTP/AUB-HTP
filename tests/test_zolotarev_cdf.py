@@ -8,19 +8,25 @@ from aub_htp.cdf.zolotarev import generate_cdf_one_point
 
 
 @pytest.mark.parametrize(
+    # Reference values are from scipy.stats.levy_stable.cdf(x, alpha, beta)
+
     "alpha,beta,x,expected",
     [
         # Incorrect additive constant in the original alpha < 1 branch.
+        # Reference: levy_stable.cdf(1.0, 0.5, 0.5)
         (0.5, 0.5, 1.0, 0.5399839777834092),
 
         # Incorrect exponential factor in the original alpha = 1 branch.
+        # Reference: levy_stable.cdf(x, 1.0, 0.5)
         (1.0, 0.5, 0.0, 0.4375114838590879),
         (1.0, 0.5, 1.0, 0.6635450982516822),
 
         # Zero raised to a negative power in the original implementation.
+        # Reference: closed form F(0) = 1/2 - theta0/pi
         (0.5, 0.5, 0.0, 0.20483276469913347),
 
         # Overflow in the original alpha = 1 kernel.
+        # Reference: levy_stable.cdf(10.0, 1.0, 0.01)
         (1.0, 0.01, 10.0, 0.9679210693916145),
     ],
 )
