@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.special import ndtr
 
-from aub_htp.cdf.zolotarev import generate_cdf_one_point
+from aub_htp.cdf.zolotarev import generate_cdf, generate_cdf_one_point
 
 
 @pytest.mark.parametrize(
@@ -66,3 +66,44 @@ def test_reflection(alpha, beta):
     reflected = generate_cdf_one_point(-1.0, alpha, -beta)
 
     assert positive + reflected == pytest.approx(1.0, abs=1e-12)
+
+
+# Inputs where the CDF came back NaN or raised OverflowError instead of a
+# probability.
+NAN_CASES = [
+    # alpha < 1, small x: x ** (alpha / (alpha - 1)) overflows.
+    (0.99, 0.0, 1e-8),
+    (0.99, 0.5, 1e-4),
+
+    # alpha < 1, huge x: NaN.
+    (0.99, -0.5, 1e5),
+    (0.99, -0.5, 1e8),
+
+    # alpha > 1, huge x: x ** (alpha / (alpha - 1)) overflows.
+    (1.01, 0.5, 1e5),
+    (1.01, 0.0, 1e8),
+    (1.01, -1.0, 1e5),
+
+    # alpha = 1: the log-space kernel must stay finite for extreme x / beta.
+    (1.0, 0.01, 1e3),
+    (1.0, 0.5, -1e3),
+    (1.0, 1.0, 1e5),
+]
+
+
+@pytest.mark.parametrize("alpha,beta,x", NAN_CASES)
+def test_finite_probability(alpha, beta, x):
+    actual = generate_cdf_one_point(x, alpha, beta)
+
+    assert np.isfinite(actual)
+    assert -1e-8 <= actual <= 1 + 1e-8
+
+
+@pytest.mark.parametrize("alpha,beta,x", NAN_CASES)
+def test_finite_probability_vectorized(alpha, beta, x):
+    # generate_cdf passes np.float64 values, which overflow to inf instead of
+    # raising OverflowError.
+    actual = generate_cdf([x], alpha, beta)
+
+    assert np.all(np.isfinite(actual))
+    assert np.all((actual >= -1e-8) & (actual <= 1 + 1e-8))
