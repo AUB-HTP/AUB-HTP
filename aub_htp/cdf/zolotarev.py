@@ -2,7 +2,22 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import brentq
 
-from aub_htp.pdf.zolotarev import theta0_stable, calculate_V
+from aub_htp.pdf.zolotarev import theta0_stable
+
+def calculate_log_V(alpha, theta0):
+    """
+    log V(θ) for alpha != 1, term by term.
+    V itself overflows or underflows when alpha is close to 1, because its
+    last factor is raised to alpha / (alpha - 1).
+    """
+    exponent = alpha / (alpha - 1)
+    c = np.log(np.cos(alpha * theta0)) / (alpha - 1)
+    return lambda theta: (
+        c
+        + np.log(np.cos(alpha * theta0 + (alpha - 1) * theta) / np.cos(theta))
+        + exponent * np.log(np.cos(theta) / np.sin(alpha * (theta + theta0)))
+    )
+
 
 def transition_points(log_g, lower, upper):
     """
@@ -87,23 +102,22 @@ def generate_cdf_one_point(x, alpha, beta):
     theta0 = theta0_stable(alpha, beta)
     if x == 0:
             return 0.5 - theta0 / np.pi
-    U = calculate_V(alpha, beta, theta0)
+    log_V = calculate_log_V(alpha, theta0)
 
     exponent = alpha / (alpha - 1)
 
-    integrand = lambda theta: np.exp(
-        -(x ** exponent) * U(theta)
-    )
+    log_g = lambda theta: exponent * np.log(x) + log_V(theta)
 
-    log_g = lambda theta: exponent * np.log(x) + np.log(U(theta))   # BREAKPOINTS
+    integrand = lambda theta: np.exp(-np.exp(log_g(theta)))
 
-    value, _ = quad(
-        integrand,
-        -theta0,
-        np.pi / 2,
-        points=transition_points(log_g, -theta0, np.pi / 2),        # BREAKPOINTS
-        epsabs=1e-8
-    )
+    with np.errstate(over="ignore"):
+        value, _ = quad(
+            integrand,
+            -theta0,
+            np.pi / 2,
+            points=transition_points(log_g, -theta0, np.pi / 2),    # BREAKPOINTS
+            epsabs=1e-8
+        )
 
     if alpha < 1:
         return 0.5 - theta0 / np.pi + value / np.pi
