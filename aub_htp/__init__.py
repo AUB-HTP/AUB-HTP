@@ -11,3 +11,23 @@ from ._alpha_stable import alpha_stable_gen, multivariate_alpha_stable_gen
 
 alpha_stable = alpha_stable_gen("alpha_stable")
 multivariate_alpha_stable = multivariate_alpha_stable_gen()
+
+__all__ = [
+    # Alpha Stable Scipy-Compatible frontend
+    "alpha_stable",
+    "alpha_stable_gen",
+    "multivariate_alpha_stable",
+    "multivariate_alpha_stable_gen",
+
+    # PDF
+    "generate_alpha_stable_pdf",
+
+    # Random
+    "BaseSpectralMeasureSampler",
+    "IsotropicSampler",
+    "EllipticSampler",
+    "DiscreteSampler",
+    "MixedSampler",
+    "UnivariateSampler",
+    "sample_alpha_stable_vector",
+]
