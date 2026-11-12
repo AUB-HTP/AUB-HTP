@@ -1,14 +1,5 @@
 """
-API Reference
-=============
-.. autosummary::
-    :toctree: generated
-
-    alpha_stable
-    multivariate_alpha_stable
-    random
-    statistics
-    machine_learning
+Tools for working with Alpha Stable (Levy-Stable) distributions.
 """
 
 from ._alpha_stable import alpha_stable_gen, multivariate_alpha_stable_gen
@@ -33,7 +24,9 @@ from .machine_learning import (
     r_alpha_score,
 )
 
+#: Univariate Alpha Stable distribution, an instance of :class:`alpha_stable_gen`.
 alpha_stable = alpha_stable_gen("alpha_stable")
+#: Multivariate Alpha Stable distribution, an instance of :class:`multivariate_alpha_stable_gen`.
 multivariate_alpha_stable = multivariate_alpha_stable_gen()
 
 
