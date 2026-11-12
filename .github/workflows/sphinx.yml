@@ -1,7 +1,5 @@
 name: "Sphinx: Render docs"
 
-# Runs from the default branch after every release, so releases cut from
-# any maintenance/v* branch rebuild the docs of all versions.
 on:
   workflow_run:
     workflows: ["Release Pipeline"]
@@ -29,8 +27,8 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
 
-      - name: Build HTML for every version
-        run: uv run --no-project python docs/build_versions.py --base-url "${{ steps.pages.outputs.base_url }}" --out site
+      - name: Build docs
+        run: uv run --no-project --python 3.12 docs/build_docs.py --base-url "${{ steps.pages.outputs.base_url }}" --out site
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
