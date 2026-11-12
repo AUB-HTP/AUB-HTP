@@ -1,3 +1,6 @@
+"""
+Random number generation for Alpha Stable Distributions
+"""
 from .spectral_measure_sampler import (
     BaseSpectralMeasureSampler,
     IsotropicSampler,
