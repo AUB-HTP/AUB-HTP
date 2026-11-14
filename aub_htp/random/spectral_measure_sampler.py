@@ -150,19 +150,39 @@ class DiscreteSampler(BaseSpectralMeasureSampler):
         positions: np.ndarray,
         weights: np.ndarray
     ):
-        self.positions = np.asarray(positions)
-        self.weights = np.asarray(weights)
-        assert self.positions.shape[0] == self.weights.shape[0] and self.positions.shape[0] > 0
-        if len(self.positions.shape) < 2:
+        self.positions = np.asarray(positions, dtype=float)
+        self.weights = np.asarray(weights, dtype=float)
+
+        if self.positions.ndim == 1:
             self.positions = self.positions.reshape(-1, 1)
-        self.number_of_dimensions = self.positions.shape[1]
+        if self.positions.ndim != 2:
+            raise ValueError("positions must be a 1D or 2D array")
+        if self.weights.ndim != 1:
+            raise ValueError("weights must be a 1D array")
+        if len(self.weights) == 0 or len(self.positions) != len(self.weights):
+            raise ValueError("positions and weights must be non-empty and have the same length")
+        if not (np.all(np.isfinite(self.positions)) and np.all(np.isfinite(self.weights))):
+            raise ValueError("positions and weights must be finite")
+        if np.any(self.weights < 0):
+            raise ValueError("weights must be non-negative")
+
         self._mass = self.weights.sum()
+        if self._mass == 0:
+            raise ValueError("weights must not all be zero")
+
+        self.number_of_dimensions = self.positions.shape[1]
+
         if alpha >= 1:
-            assert np.all((self.positions*self.weights[:, None]).sum(axis = 0) == 0), "when alpha >= 1, the weighted mean of the positions should be 0."
+            weighted = self.positions * self.weights[:, None]
+            # Rounding error in a sum grows with the size of its terms,
+            # so the tolerance is scaled by their total magnitude.
+            tolerance = 1e-12 * np.abs(weighted).sum()
+            if np.any(np.abs(weighted.sum(axis=0)) > tolerance):
+                raise ValueError("when alpha >= 1, the weighted mean of the positions must be 0")
 
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         random_state = get_random_state_generator(random_state)
-        indices = random_state.choice(len(self.weights), size=number_of_samples, p=self.weights / self.weights.sum())
+        indices = random_state.choice(len(self.weights), size=number_of_samples, p=self.weights / self._mass)
         return self.positions[indices]
 
     def dimensions(self) -> int:
