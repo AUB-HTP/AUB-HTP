@@ -3,12 +3,12 @@ import numpy as np
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import validate_data
 
-from .utils import compute_feature_wise_location
+from aub_htp.statistics import alpha_location, alpha_power
 
 MethodLiteral = Literal["ratio", "log-difference"]
 
-from .ratio import estimate_shape_ratio
-from .log_difference import estimate_shape_log_difference
+from .ratio import estimate_correlation_ratio
+from .log_difference import estimate_correlation_log_difference
 
 
 class AlphaStableShape(BaseEstimator):
@@ -28,12 +28,36 @@ class AlphaStableShape(BaseEstimator):
                 f"method must be one of {get_args(MethodLiteral)}, got {self.method!r}."
             )
 
-        if self.method == "ratio":
-            shape_matrix = estimate_shape_ratio(X, alpha)
-        else:
-            shape_matrix = estimate_shape_log_difference(X, alpha)
-        location = compute_feature_wise_location(X, alpha)
+        location, small_sigma = self._fit_marginals(X, alpha)
+        X_centered = X - location
 
-        self.shape_ = shape_matrix
+        if self.method == "ratio":
+            correlation_matrix = estimate_correlation_ratio(X_centered)
+        else:
+            correlation_matrix = estimate_correlation_log_difference(X_centered)
+
+        # diag(sigma) R diag(sigma)
+        self.shape_ = small_sigma[:, None] * correlation_matrix * small_sigma[None, :]
         self.location_ = location
         return self
+
+    @staticmethod
+    def _fit_marginals(X: np.ndarray, alpha: float) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Location and sigma_i = sqrt(shape_ii) of each feature.
+
+        Each feature is symmetric alpha-stable with scale gamma_i = sigma_i / sqrt(2),
+        and its alpha-power is alpha^(1/alpha) gamma_i, so
+
+            sigma_i = sqrt(2) / alpha^(1/alpha) * power_i
+        """
+        _, n_features = X.shape
+        power_to_sigma = float(np.sqrt(2.0) / alpha ** (1.0 / alpha))
+
+        location = np.empty(n_features, dtype=float)
+        small_sigma = np.empty(n_features, dtype=float)
+        for feature in range(n_features):
+            x = X[:, feature]
+            location[feature] = alpha_location(x, alpha)
+            small_sigma[feature] = power_to_sigma * alpha_power(x - location[feature], alpha)
+        return location, small_sigma

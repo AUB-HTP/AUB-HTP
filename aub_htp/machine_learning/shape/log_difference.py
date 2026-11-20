@@ -1,38 +1,16 @@
 import numpy as np
 
-from .utils import estimate_marginals, compute_feature_wise_location, compute_feature_wise_power
 
 # Var(log|Z_i| - log|Z_j|) at rho = 0, for standard normals Z_i, Z_j.
 MAX_LOG_DIFFERENCE_VARIANCE: float = np.pi ** 2 / 4.0
 
 
-def estimate_shape_log_difference(
-    data: np.ndarray,
-    alpha: float,
-    *,
-    log_eps: float = 2.0 ** -20,
-) -> np.ndarray:
-    data = np.asarray(data)
-
-    small_sigma = estimate_marginals(data, alpha)
-
-    data_centered = data - compute_feature_wise_location(data, alpha)
-    data_standardized = ( data_centered
-                        / np.maximum(small_sigma, np.finfo(float).tiny)[None, :])
-
-    correlation_matrix = estimate_correlation_matrix(data_standardized, log_eps=log_eps)
-
-    diagonal_matrix = np.diag(compute_feature_wise_power(data_centered, alpha))
-    shape_matrix = diagonal_matrix @ correlation_matrix @ diagonal_matrix
-    return shape_matrix
-
-
-def estimate_correlation_matrix(data: np.ndarray, *, log_eps: float = 2.0 ** -20) -> np.ndarray:
+def estimate_correlation_log_difference(data: np.ndarray, *, log_eps: float = 2.0 ** -20) -> np.ndarray:
     """
-    Estimate the correlation matrix R of centered data whose features have scale 1.
+    Estimate the correlation matrix R of centered data.
 
-    Each row is sqrt(A) Z with Z ~ N(0, R), so A cancels in
-    log|x_i| - log|x_j| = log|Z_i| - log|Z_j|, and
+    Each row is sqrt(A) G with G_i = sigma_i Z_i and Z ~ N(0, R), so A cancels in
+    log|x_i| - log|x_j| = log(sigma_i / sigma_j) + log|Z_i| - log|Z_j|, and
 
         Var(log|x_i| - log|x_j|) = pi^2 / 4 - arcsin(rho_ij)^2
 

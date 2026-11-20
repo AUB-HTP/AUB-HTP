@@ -1,24 +1,8 @@
 import numpy as np
 from aub_htp.statistics import alpha_location, alpha_power
-from .utils import estimate_marginals, compute_feature_wise_location
 
 
-def estimate_shape_ratio(data: np.ndarray, alpha: float):
-    data = np.asarray(data)
-
-    small_sigma = estimate_marginals(data, alpha)
-    location = compute_feature_wise_location(data, alpha)
-
-    data_centered = data - location
-    
-    correlation_matrix = estimate_correlation_matrix(data_centered)
-
-    diagonal_matrix = np.diag(small_sigma)
-    shape_matrix = diagonal_matrix @ correlation_matrix @ diagonal_matrix
-    return shape_matrix
-
-
-def estimate_correlation_matrix(
+def estimate_correlation_ratio(
     data: np.ndarray,
     *,
     min_denominator: float = 0.0,
