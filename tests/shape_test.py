@@ -25,14 +25,10 @@ XFAIL_CORRELATION = {
         {(alpha, rho) for alpha in ALPHAS for rho in (-0.9, 0.9)},
         "issue 1: gamma is measured around 0, not mu",
     ),
-    "log-difference": (
-        {(alpha, rho) for alpha in ALPHAS for rho in (-0.9, -0.5, 0.9)},
-        "issues 4 and 5: wrong lookup table, and the sign of rho is lost",
-    ),
 }
 XFAIL_THREE_FEATURES = {
     "ratio": "issue 1: gamma is measured around 0, not mu",
-    "log-difference": "issues 4, 5 and 6: wrong lookup table, no sign, wrong scale",
+    "log-difference": "issue 6: shape_ is built from the alpha-power instead of sigma",
 }
 XFAIL_EXTREME_SCALE = "commit 4: alpha_location and alpha_power use a fixed start and xtol"
 XFAIL_SHAPE_SCALING = {(method, scale) for method in METHODS for scale in SCALES}

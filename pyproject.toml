@@ -22,7 +22,6 @@ include = ["aub_htp*"]
 aub_htp = [
     "pdf/data/*.npz",
     "cdf/data/*.npz",
-    "machine_learning/_shape/data/*.npz",
 ]
 
 [project.urls]
