@@ -37,12 +37,15 @@ def fit_cauchy_1d(data: np.ndarray) -> tuple[float, float]:
     """
     Fit a Cauchy(μ, γ) to 1-D data using our α=1 location/power solver.
 
-    For α=1, the α-power P* equals the Cauchy scale γ at optimum μ*.
     Returns (μ̂, γ̂).
     """
     mu_hat = alpha_location(data, alpha=1.0)
-    gamma_hat = alpha_power(data, alpha=1.0)
-    return float(np.squeeze(mu_hat)), gamma_hat
+    mu_hat = float(np.squeeze(mu_hat))
+
+    # For α=1, the α-power of the data centered at μ̂ equals the Cauchy scale γ.
+    gamma_hat = alpha_power(data - mu_hat, alpha=1.0)
+    
+    return mu_hat, gamma_hat
 
 
 def compute_correlation_element(mu_ij: float, gamma_ij: float) -> float:

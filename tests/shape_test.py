@@ -13,18 +13,6 @@ N_SAMPLES = 4000
 SIGMA = np.array([1.0, 2.0])
 LOCATION = np.array([3.0, -1.0])
 
-# What fails today, as method -> (failing (alpha, rho) pairs, reason).
-# Each later commit removes the entries it fixes.
-XFAIL_SIGMA = {}
-XFAIL_CORRELATION = {
-    "ratio": (
-        {(alpha, rho) for alpha in ALPHAS for rho in (-0.9, 0.9)},
-        "issue 1: gamma is measured around 0, not mu",
-    ),
-}
-XFAIL_THREE_FEATURES = {
-    "ratio": "issue 1: gamma is measured around 0, not mu",
-}
 # alpha_location and alpha_power start at power = 1 with a fixed xtol, so they fail on
 # small-scale data. To be fixed in statistics.py.
 XFAIL_SMALL_SCALE = "alpha_location and alpha_power fail on small-scale data"
@@ -93,25 +81,6 @@ def fit_two_features(method, alpha, rho):
     return AlphaStableShape(alpha=alpha, method=method).fit(X), shape_matrix
 
 
-def method_alpha_rho_cases(xfail):
-    for method in METHODS:
-        failing, reason = xfail.get(method, (set(), ""))
-        for alpha in ALPHAS:
-            for rho in RHOS:
-                marks = []
-                if (alpha, rho) in failing:
-                    marks.append(pytest.mark.xfail(strict=True, reason=reason))
-                yield pytest.param(method, alpha, rho, marks=marks)
-
-
-def method_cases(xfail_reasons):
-    for method in METHODS:
-        marks = []
-        if method in xfail_reasons:
-            marks.append(pytest.mark.xfail(strict=True, reason=xfail_reasons[method]))
-        yield pytest.param(method, marks=marks)
-
-
 def method_scale_cases(xfail):
     for method in METHODS:
         for scale in SCALES:
@@ -123,20 +92,24 @@ def method_scale_cases(xfail):
 
 class TestAlphaStableShapeCorrectness:
 
-    @pytest.mark.parametrize(("method", "alpha", "rho"), method_alpha_rho_cases(XFAIL_SIGMA))
+    @pytest.mark.parametrize("method", METHODS)
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    @pytest.mark.parametrize("rho", RHOS)
     def test_recovers_sigma(self, method, alpha, rho):
         """sqrt(shape_ii) should be close to the true sigma_i."""
         estimator, shape_matrix = fit_two_features(method, alpha, rho)
         assert sigma_error(estimator.shape_, shape_matrix) < 0.1
 
-    @pytest.mark.parametrize(("method", "alpha", "rho"), method_alpha_rho_cases(XFAIL_CORRELATION))
+    @pytest.mark.parametrize("method", METHODS)
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    @pytest.mark.parametrize("rho", RHOS)
     def test_recovers_correlation(self, method, alpha, rho):
         """shape_ij / (sigma_i sigma_j) should be close to the true rho, sign included."""
         estimator, shape_matrix = fit_two_features(method, alpha, rho)
         tolerance = correlation_tolerance(method, rho)
         assert correlation_error(estimator.shape_, shape_matrix) < tolerance
 
-    @pytest.mark.parametrize("method", method_cases(XFAIL_THREE_FEATURES))
+    @pytest.mark.parametrize("method", METHODS)
     def test_recovers_shape_matrix_three_features(self, method):
         """shape_ should be close to the true shape matrix with mixed-sign correlations."""
         correlation_matrix = [[1.0, 0.8, -0.5], [0.8, 1.0, -0.3], [-0.5, -0.3, 1.0]]
