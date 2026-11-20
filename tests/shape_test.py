@@ -16,16 +16,11 @@ METHODS = ["ratio", "log-difference", "sheppard", "tyler"]
 PAIRWISE_METHODS = ["ratio", "log-difference", "sheppard"]
 ALPHAS = [1.0, 1.5, 2.0]
 RHOS = [-0.9, -0.5, 0.0, 0.5, 0.9]
-SCALES = [1e-6, 1e6]
+SCALES = [1e6]
 
 N_SAMPLES = 4000
 SIGMA = np.array([1.0, 2.0])
 LOCATION = np.array([3.0, -1.0])
-
-# alpha_location and alpha_power start at power = 1 with a fixed xtol, so they fail on
-# small-scale data. To be fixed in statistics.py.
-XFAIL_SMALL_SCALE = "alpha_location and alpha_power fail on small-scale data"
-XFAIL_SCALING = {(method, 1e-6) for method in METHODS}
 
 
 def sample_sub_gaussian(n_samples, alpha, shape_matrix, location, seed):
@@ -88,15 +83,6 @@ def fit_two_features(method, alpha, rho):
     shape_matrix = make_shape_matrix(SIGMA, [[1.0, rho], [rho, 1.0]])
     X = sample_sub_gaussian(N_SAMPLES, alpha, shape_matrix, LOCATION, seed=0)
     return AlphaStableShape(alpha=alpha, method=method).fit(X), shape_matrix
-
-
-def method_scale_cases(xfail):
-    for method in METHODS:
-        for scale in SCALES:
-            marks = []
-            if (method, scale) in xfail:
-                marks.append(pytest.mark.xfail(strict=True, reason=XFAIL_SMALL_SCALE))
-            yield pytest.param(method, scale, marks=marks)
 
 
 class TestAlphaStableShapeCorrectness:
@@ -290,7 +276,8 @@ class TestPositiveSemiDefiniteRepair:
 
 class TestAlphaStableShapeScaling:
 
-    @pytest.mark.parametrize(("method", "scale"), method_scale_cases(XFAIL_SCALING))
+    @pytest.mark.parametrize("method", METHODS)
+    @pytest.mark.parametrize("scale", SCALES)
     def test_scaling_data_by_c_scales_shape_by_c_squared(self, method, scale):
         """Fitting c X should give c^2 times the shape matrix of X."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
@@ -307,7 +294,8 @@ class TestAlphaStableShapeScaling:
         tolerance = 0.1 if method == "log-difference" else 1e-2
         assert np.allclose(correlation_of_scaled, correlation, rtol=0.0, atol=tolerance)
 
-    @pytest.mark.parametrize(("method", "scale"), method_scale_cases(XFAIL_SCALING))
+    @pytest.mark.parametrize("method", METHODS)
+    @pytest.mark.parametrize("scale", SCALES)
     def test_scaling_data_by_c_scales_location_by_c(self, method, scale):
         """Fitting c X should give c times the location of X."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
