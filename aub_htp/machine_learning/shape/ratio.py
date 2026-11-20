@@ -2,42 +2,29 @@ import numpy as np
 from aub_htp.statistics import alpha_location, alpha_power
 
 
-def estimate_correlation_ratio(
-    data: np.ndarray,
-    *,
-    min_denominator: float = 0.0,
-    min_keep_frac: float = 0.90,
-) -> np.ndarray:
+def estimate_correlation_ratio(data: np.ndarray) -> np.ndarray:
     """
     Estimate correlation matrix R using the ratio trick and Eq. (5.12):
 
-        z_ij = X_i / X_j  (assuming centered data)
+        z_ij = X_i / X_j  (assuming centered data; rows with X_j = 0 are left out)
         Fit Cauchy(z_ij) → (μ_ij, γ_ij)
         ρ_ij = μ_ij / √(μ_ij² + γ_ij²)
     Returns
     -------
     correlation_matrix: (d, d) correlation matrix.
     """
-    n, d = data.shape
+    _, d = data.shape
     correlation_matrix = np.eye(d, dtype=float)
-    eps = np.finfo(float).eps
-
-    def _mask_denom(den: np.ndarray) -> np.ndarray:
-        thr = max(min_denominator, eps)
-        return np.abs(den) > thr
 
     # Full pairwise computation
     for i in range(d):
         num_i = data[:, i]
         for j in range(i + 1, d):
             den_j = data[:, j]
-            mask = _mask_denom(den_j)
-            if mask.sum() < max(5, int(min_keep_frac * n)):
-                rho = 0.0
-            else:
-                z = num_i[mask] / den_j[mask]
-                mu_ij, gam_ij = fit_cauchy_1d(z)
-                rho = compute_correlation_element(mu_ij, gam_ij)
+            mask = den_j != 0
+            z = num_i[mask] / den_j[mask]
+            mu_ij, gam_ij = fit_cauchy_1d(z)
+            rho = compute_correlation_element(mu_ij, gam_ij)
             correlation_matrix[i, j] = correlation_matrix[j, i] = float(np.clip(rho, -1.0, 1.0))
 
     # Symmetrize & normalize

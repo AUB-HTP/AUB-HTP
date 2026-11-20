@@ -17,7 +17,7 @@ class AlphaStableShape(BaseEstimator):
         self.method = method
 
     def fit(self, X, y=None):
-        X = validate_data(self, X)
+        X = validate_data(self, X, ensure_min_samples=2)
         X = np.asarray(X, dtype=float)
 
         alpha = self.alpha

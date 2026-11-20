@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from aub_htp.machine_learning import AlphaStableShape
+from aub_htp.machine_learning.shape.ratio import estimate_correlation_ratio
 
 METHODS = ["ratio", "log-difference"]
 ALPHAS = [1.0, 1.5, 2.0]
@@ -28,7 +29,6 @@ XFAIL_THREE_FEATURES = {
 # small-scale data. To be fixed in statistics.py.
 XFAIL_SMALL_SCALE = "alpha_location and alpha_power fail on small-scale data"
 XFAIL_SCALING = {(method, 1e-6) for method in METHODS}
-XFAIL_SINGLE_SAMPLE = {method: "commit 5: fit accepts a single sample" for method in METHODS}
 
 
 def sample_sub_gaussian(n_samples, alpha, shape_matrix, location, seed):
@@ -160,6 +160,29 @@ class TestAlphaStableShapeCorrectness:
         assert np.all(np.abs(estimator.location_ - LOCATION) < 0.15 * SIGMA)
 
 
+class TestRatioZeroHandling:
+
+    def test_rows_with_zero_denominator_are_left_out(self):
+        """Exact zeros in x_j should be skipped, not turn rho into a guess of 0."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=10)
+        X[::5, 1] = 0.0
+
+        correlation_matrix = estimate_correlation_ratio(X)
+
+        assert abs(correlation_matrix[0, 1] - 0.5) < 0.1
+
+    def test_tiny_scale_data_is_not_masked(self):
+        """The ratio x_i / x_j has no scale, so tiny data should give the same rho."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=11)
+
+        correlation_matrix = estimate_correlation_ratio(X)
+        correlation_matrix_of_tiny = estimate_correlation_ratio(1e-20 * X)
+
+        assert np.allclose(correlation_matrix_of_tiny, correlation_matrix, rtol=0.0, atol=1e-2)
+
+
 class TestAlphaStableShapeScaling:
 
     @pytest.mark.parametrize(("method", "scale"), method_scale_cases(XFAIL_SCALING))
@@ -222,7 +245,7 @@ class TestAlphaStableShapeValidation:
         with pytest.raises(ValueError):
             AlphaStableShape(alpha=1.0, method=method).fit(X)
 
-    @pytest.mark.parametrize("method", method_cases(XFAIL_SINGLE_SAMPLE))
+    @pytest.mark.parametrize("method", METHODS)
     def test_rejects_fewer_than_two_samples(self, method):
         """A single sample has no spread, so fit should reject it."""
         with pytest.raises(ValueError):
