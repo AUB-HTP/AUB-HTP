@@ -5,10 +5,12 @@ from sklearn.utils.validation import validate_data
 
 from aub_htp.statistics import alpha_location, alpha_power
 
-MethodLiteral = Literal["ratio", "log-difference"]
+MethodLiteral = Literal["ratio", "log-difference", "sheppard", "tyler"]
 
 from .ratio import estimate_correlation_ratio
 from .log_difference import estimate_correlation_log_difference
+from .sheppard import estimate_correlation_sheppard
+from .tyler import estimate_correlation_tyler
 from .utils import repair_correlation_matrix
 
 
@@ -32,12 +34,18 @@ class AlphaStableShape(BaseEstimator):
         location, small_sigma = self._fit_marginals(X, alpha)
         X_centered = X - location
 
-        if self.method == "ratio":
-            correlation_matrix = estimate_correlation_ratio(X_centered)
+        if self.method == "tyler":
+            # Always PSD.
+            correlation_matrix = estimate_correlation_tyler(X_centered)
         else:
-            correlation_matrix = estimate_correlation_log_difference(X_centered)
-        # Both methods estimate each rho_ij on its own, so R may not be PSD.
-        correlation_matrix = repair_correlation_matrix(correlation_matrix)
+            if self.method == "ratio":
+                correlation_matrix = estimate_correlation_ratio(X_centered)
+            elif self.method == "log-difference":
+                correlation_matrix = estimate_correlation_log_difference(X_centered)
+            else:
+                correlation_matrix = estimate_correlation_sheppard(X_centered)
+            # These methods estimate each rho_ij on its own, so R may not be PSD.
+            correlation_matrix = repair_correlation_matrix(correlation_matrix)
 
         # diag(sigma) R diag(sigma)
         self.shape_ = small_sigma[:, None] * correlation_matrix * small_sigma[None, :]

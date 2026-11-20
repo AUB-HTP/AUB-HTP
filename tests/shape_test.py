@@ -2,13 +2,18 @@ import warnings
 
 import numpy as np
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 
 from aub_htp.machine_learning import AlphaStableShape
 from aub_htp.machine_learning.shape import shape as shape_module
 from aub_htp.machine_learning.shape.ratio import estimate_correlation_ratio
+from aub_htp.machine_learning.shape.sheppard import estimate_correlation_sheppard
+from aub_htp.machine_learning.shape.tyler import estimate_correlation_tyler
 from aub_htp.machine_learning.shape.utils import repair_correlation_matrix
 
-METHODS = ["ratio", "log-difference"]
+METHODS = ["ratio", "log-difference", "sheppard", "tyler"]
+# These estimate each rho_ij on its own, so their R may not be PSD.
+PAIRWISE_METHODS = ["ratio", "log-difference", "sheppard"]
 ALPHAS = [1.0, 1.5, 2.0]
 RHOS = [-0.9, -0.5, 0.0, 0.5, 0.9]
 SCALES = [1e-6, 1e6]
@@ -160,6 +165,88 @@ class TestRatioZeroHandling:
         assert np.allclose(correlation_matrix_of_tiny, correlation_matrix, rtol=0.0, atol=1e-2)
 
 
+class TestSheppard:
+
+    def test_rows_with_a_zero_product_are_left_out(self):
+        """Exact zeros should not count as negative products."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=13)
+        X_with_zeros = np.vstack([X, np.zeros((N_SAMPLES, 2))])
+
+        correlation_matrix = estimate_correlation_sheppard(X)
+        correlation_matrix_with_zeros = estimate_correlation_sheppard(X_with_zeros)
+
+        assert np.array_equal(correlation_matrix_with_zeros, correlation_matrix)
+
+    def test_known_sign_counts(self):
+        """3 positive products out of 4 give p = 3/4, so rho = sin(pi / 4)."""
+        X = np.array([[1.0, 2.0], [-1.0, -3.0], [2.0, 1.0], [1.0, -1.0], [0.0, 5.0]])
+        correlation_matrix = estimate_correlation_sheppard(X)
+        assert np.isclose(correlation_matrix[0, 1], np.sin(np.pi / 4.0), rtol=1e-12, atol=0.0)
+
+
+class TestTyler:
+
+    def test_rejects_too_few_samples(self):
+        """Tyler needs more samples than features."""
+        with pytest.raises(ValueError):
+            estimate_correlation_tyler(np.array([[1.0, 2.0], [3.0, -1.0]]))
+
+    def test_zero_rows_do_not_count_as_samples(self):
+        """Rows equal to 0 are dropped before counting samples."""
+        X = np.array([[1.0, 2.0], [3.0, -1.0], [0.0, 0.0], [0.0, 0.0]])
+        with pytest.raises(ValueError):
+            estimate_correlation_tyler(X)
+
+    def test_fit_rejects_too_few_samples(self):
+        with pytest.raises(ValueError):
+            AlphaStableShape(alpha=1.0, method="tyler").fit(np.array([[1.0, 2.0], [3.0, -1.0]]))
+
+    def test_zero_rows_are_dropped(self):
+        """Adding rows equal to 0 should not change the result."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=14)
+        X_with_zeros = np.vstack([X, np.zeros((100, 2))])
+
+        correlation_matrix = estimate_correlation_tyler(X)
+        correlation_matrix_with_zeros = estimate_correlation_tyler(X_with_zeros)
+
+        assert np.allclose(correlation_matrix_with_zeros, correlation_matrix, rtol=0.0, atol=1e-12)
+
+    def test_warns_when_it_does_not_converge(self):
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.9], [0.9, 1.0]])
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=15)
+        with pytest.warns(ConvergenceWarning):
+            estimate_correlation_tyler(X, iterations=1)
+
+    def test_converges_without_warning(self):
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.9], [0.9, 1.0]])
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=15)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            estimate_correlation_tyler(X)
+
+    def test_huge_rows_do_not_overflow(self):
+        """Rows are normalized, so entries near the largest float should be fine."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=16)
+
+        correlation_matrix = estimate_correlation_tyler(X)
+        correlation_matrix_of_huge = estimate_correlation_tyler(1e300 * X)
+
+        assert np.allclose(correlation_matrix_of_huge, correlation_matrix, rtol=0.0, atol=1e-9)
+
+    def test_result_is_psd(self):
+        correlation_matrix = [[1.0, 0.8, -0.5], [0.8, 1.0, -0.3], [-0.5, -0.3, 1.0]]
+        shape_matrix = make_shape_matrix([1.0, 0.5, 3.0], correlation_matrix)
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(3), seed=17)
+
+        estimate = estimate_correlation_tyler(X)
+
+        assert np.linalg.eigvalsh(estimate).min() > 0
+        assert np.allclose(np.diag(estimate), 1.0, rtol=0.0, atol=1e-12)
+
+
 # Each pair is a valid correlation, but together they are impossible:
 # its smallest eigenvalue is -0.8.
 NOT_PSD = np.array([[1.0, 0.9, -0.9], [0.9, 1.0, 0.9], [-0.9, 0.9, 1.0]])
@@ -187,10 +274,10 @@ class TestPositiveSemiDefiniteRepair:
 
         assert np.array_equal(repaired, correlation_matrix)
 
-    @pytest.mark.parametrize("method", METHODS)
+    @pytest.mark.parametrize("method", PAIRWISE_METHODS)
     def test_fit_returns_a_psd_shape(self, method, monkeypatch):
         """fit should repair R before building shape_."""
-        name = {"ratio": "estimate_correlation_ratio", "log-difference": "estimate_correlation_log_difference"}[method]
+        name = "estimate_correlation_" + method.replace("-", "_")
         monkeypatch.setattr(shape_module, name, lambda X: NOT_PSD.copy())
         shape_matrix = make_shape_matrix([1.0, 2.0, 0.5], np.eye(3))
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(3), seed=12)
