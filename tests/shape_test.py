@@ -1,8 +1,12 @@
+import warnings
+
 import numpy as np
 import pytest
 
 from aub_htp.machine_learning import AlphaStableShape
+from aub_htp.machine_learning.shape import shape as shape_module
 from aub_htp.machine_learning.shape.ratio import estimate_correlation_ratio
+from aub_htp.machine_learning.shape.utils import repair_correlation_matrix
 
 METHODS = ["ratio", "log-difference"]
 ALPHAS = [1.0, 1.5, 2.0]
@@ -154,6 +158,47 @@ class TestRatioZeroHandling:
         correlation_matrix_of_tiny = estimate_correlation_ratio(1e-20 * X)
 
         assert np.allclose(correlation_matrix_of_tiny, correlation_matrix, rtol=0.0, atol=1e-2)
+
+
+# Each pair is a valid correlation, but together they are impossible:
+# its smallest eigenvalue is -0.8.
+NOT_PSD = np.array([[1.0, 0.9, -0.9], [0.9, 1.0, 0.9], [-0.9, 0.9, 1.0]])
+
+
+class TestPositiveSemiDefiniteRepair:
+
+    def test_repairs_a_matrix_that_is_not_psd(self):
+        """The result should be a PSD correlation matrix, and a warning should be raised."""
+        with pytest.warns(UserWarning, match="not positive semi-definite"):
+            repaired = repair_correlation_matrix(NOT_PSD)
+
+        assert np.linalg.eigvalsh(repaired).min() > 0
+        assert np.allclose(np.diag(repaired), 1.0, rtol=0.0, atol=1e-12)
+        assert np.allclose(repaired, repaired.T, rtol=0.0, atol=1e-12)
+        assert np.all(np.abs(repaired) <= 1.0 + 1e-12)
+
+    @pytest.mark.parametrize("rho", [0.0, 0.5, -0.9, 1.0])
+    def test_leaves_a_psd_matrix_unchanged(self, rho):
+        """A PSD matrix should come back as it is, with no warning."""
+        correlation_matrix = np.array([[1.0, rho], [rho, 1.0]])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            repaired = repair_correlation_matrix(correlation_matrix)
+
+        assert np.array_equal(repaired, correlation_matrix)
+
+    @pytest.mark.parametrize("method", METHODS)
+    def test_fit_returns_a_psd_shape(self, method, monkeypatch):
+        """fit should repair R before building shape_."""
+        name = {"ratio": "estimate_correlation_ratio", "log-difference": "estimate_correlation_log_difference"}[method]
+        monkeypatch.setattr(shape_module, name, lambda X: NOT_PSD.copy())
+        shape_matrix = make_shape_matrix([1.0, 2.0, 0.5], np.eye(3))
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(3), seed=12)
+
+        with pytest.warns(UserWarning, match="not positive semi-definite"):
+            estimator = AlphaStableShape(alpha=1.0, method=method).fit(X)
+
+        assert np.linalg.eigvalsh(estimator.shape_).min() > 0
 
 
 class TestAlphaStableShapeScaling:

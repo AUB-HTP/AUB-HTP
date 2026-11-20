@@ -9,6 +9,7 @@ MethodLiteral = Literal["ratio", "log-difference"]
 
 from .ratio import estimate_correlation_ratio
 from .log_difference import estimate_correlation_log_difference
+from .utils import repair_correlation_matrix
 
 
 class AlphaStableShape(BaseEstimator):
@@ -35,6 +36,8 @@ class AlphaStableShape(BaseEstimator):
             correlation_matrix = estimate_correlation_ratio(X_centered)
         else:
             correlation_matrix = estimate_correlation_log_difference(X_centered)
+        # Both methods estimate each rho_ij on its own, so R may not be PSD.
+        correlation_matrix = repair_correlation_matrix(correlation_matrix)
 
         # diag(sigma) R diag(sigma)
         self.shape_ = small_sigma[:, None] * correlation_matrix * small_sigma[None, :]
