@@ -3,7 +3,7 @@ import pytest
 
 from aub_htp.machine_learning import AlphaStableShape
 
-METHODS = ["method1", "method2", "method3"]
+METHODS = ["ratio", "log-difference"]
 ALPHAS = [1.0, 1.5, 2.0]
 RHOS = [-0.9, -0.5, 0.0, 0.5, 0.9]
 SCALES = [1e-6, 1e6]
@@ -12,36 +12,30 @@ N_SAMPLES = 4000
 SIGMA = np.array([1.0, 2.0])
 LOCATION = np.array([3.0, -1.0])
 
-ALL_ALPHAS_AND_RHOS = {(alpha, rho) for alpha in ALPHAS for rho in RHOS}
-
 # What fails today, as method -> (failing (alpha, rho) pairs, reason).
 # Each later commit removes the entries it fixes.
 XFAIL_SIGMA = {
-    "method2": (
+    "log-difference": (
         {(1.0, rho) for rho in RHOS},
         "issue 6: shape_ is built from the alpha-power instead of sigma",
     ),
-    "method3": (ALL_ALPHAS_AND_RHOS, "issue 7: does not converge to the shape matrix"),
 }
 XFAIL_CORRELATION = {
-    "method1": (
+    "ratio": (
         {(alpha, rho) for alpha in ALPHAS for rho in (-0.9, 0.9)},
         "issue 1: gamma is measured around 0, not mu",
     ),
-    "method2": (
+    "log-difference": (
         {(alpha, rho) for alpha in ALPHAS for rho in (-0.9, -0.5, 0.9)},
         "issues 4 and 5: wrong lookup table, and the sign of rho is lost",
     ),
-    "method3": (ALL_ALPHAS_AND_RHOS, "issue 7: does not converge to the shape matrix"),
 }
 XFAIL_THREE_FEATURES = {
-    "method1": "issue 1: gamma is measured around 0, not mu",
-    "method2": "issues 4, 5 and 6: wrong lookup table, no sign, wrong scale",
-    "method3": "issue 7: does not converge to the shape matrix",
+    "ratio": "issue 1: gamma is measured around 0, not mu",
+    "log-difference": "issues 4, 5 and 6: wrong lookup table, no sign, wrong scale",
 }
 XFAIL_EXTREME_SCALE = "commit 4: alpha_location and alpha_power use a fixed start and xtol"
-# method3 happens to pass at 1e6.
-XFAIL_SHAPE_SCALING = {(method, scale) for method in METHODS for scale in SCALES} - {("method3", 1e6)}
+XFAIL_SHAPE_SCALING = {(method, scale) for method in METHODS for scale in SCALES}
 XFAIL_LOCATION_SCALING = {(method, scale) for method in METHODS for scale in SCALES}
 XFAIL_SINGLE_SAMPLE = {method: "commit 5: fit accepts a single sample" for method in METHODS}
 
@@ -90,8 +84,8 @@ def correlation_error(estimate, shape_matrix):
 
 
 def correlation_tolerance(method, rho):
-    # method 2 only sees |rho|: noisy at moderate rho, and biased away from 0 at rho = 0.
-    if method == "method2":
+    # log-difference only sees |rho|: noisy at moderate rho, and biased away from 0 at rho = 0.
+    if method == "log-difference":
         if rho == 0.0:
             return 0.5
         if abs(rho) == 0.5:
@@ -237,10 +231,22 @@ class TestAlphaStableShapeValidation:
         with pytest.raises(ValueError):
             AlphaStableShape(alpha=1.0, method=method).fit(np.array([[1.0, 2.0]]))
 
-    def test_rejects_unknown_method(self):
+    @pytest.mark.parametrize("method", ["unknown", "method1", "method2", "method3"])
+    def test_rejects_unknown_and_old_method_names(self, method):
+        """The old names were removed without aliases."""
         X = sample_sub_gaussian(200, 1.0, np.eye(2), np.zeros(2), seed=8)
         with pytest.raises(ValueError):
-            AlphaStableShape(alpha=1.0, method="unknown").fit(X)
+            AlphaStableShape(alpha=1.0, method=method).fit(X)
+
+    @pytest.mark.parametrize("argument", ["alpha_kernel", "alpha_data"])
+    def test_rejects_removed_alpha_arguments(self, argument):
+        """alpha_kernel and alpha_data were replaced by the single alpha."""
+        with pytest.raises(TypeError):
+            AlphaStableShape(**{argument: 1.0})
+
+    def test_has_no_score(self):
+        """score was never implemented, so it was removed."""
+        assert not hasattr(AlphaStableShape(), "score")
 
     @pytest.mark.parametrize("alpha", [0.0, -1.0, 2.5])
     def test_rejects_alpha_outside_range(self, alpha):

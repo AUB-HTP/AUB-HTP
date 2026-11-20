@@ -1,11 +1,11 @@
 import numpy as np
 from aub_htp.statistics import alpha_location, alpha_power
 
-def estimate_marginals(data: np.ndarray, alpha_kernel: float, alpha_data: float) -> np.ndarray:
+def estimate_marginals(data: np.ndarray, alpha: float) -> np.ndarray:
     assert data.ndim == 2
-    location = compute_feature_wise_location(data, alpha_kernel)
-    power = compute_feature_wise_power(data - location, alpha_kernel)
-    small_sigma = float(np.sqrt(2.0) / (alpha_data ** (1.0 / alpha_data))) * power
+    location = compute_feature_wise_location(data, alpha)
+    power = compute_feature_wise_power(data - location, alpha)
+    small_sigma = float(np.sqrt(2.0) / (alpha ** (1.0 / alpha))) * power
     return small_sigma 
 
 

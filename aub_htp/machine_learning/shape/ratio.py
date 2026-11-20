@@ -3,10 +3,10 @@ from aub_htp.statistics import alpha_location, alpha_power
 from .utils import estimate_marginals, compute_feature_wise_location
 
 
-def estimate_shape_method1(data: np.ndarray, alpha: float):
+def estimate_shape_ratio(data: np.ndarray, alpha: float):
     data = np.asarray(data)
 
-    small_sigma = estimate_marginals(data, alpha_kernel=alpha, alpha_data=alpha)
+    small_sigma = estimate_marginals(data, alpha)
     location = compute_feature_wise_location(data, alpha)
 
     data_centered = data - location

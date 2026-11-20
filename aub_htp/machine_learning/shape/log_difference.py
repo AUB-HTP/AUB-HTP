@@ -11,26 +11,25 @@ from .utils import estimate_marginals, compute_feature_wise_location, compute_fe
 E_LOG_ABS_Z: float = - (np.euler_gamma + np.log(2.0)) / 2.0
 
 
-def estimate_shape_method2(
-    data: np.ndarray, 
-    alpha_kernel: float, 
-    alpha_data: float,
+def estimate_shape_log_difference(
+    data: np.ndarray,
+    alpha: float,
     *,
     log_eps: float = 0.0,
 ) -> np.ndarray:
     data = np.asarray(data)
     n_samples, n_features = data.shape
 
-    small_sigma = estimate_marginals(data, alpha_kernel=alpha_kernel, alpha_data=alpha_data)
+    small_sigma = estimate_marginals(data, alpha)
     
-    data_centered = data - compute_feature_wise_location(data, alpha_kernel)
+    data_centered = data - compute_feature_wise_location(data, alpha)
     data_standardized = ( data_centered
                         / np.maximum(small_sigma, np.finfo(float).tiny)[None, :])
     
     L = np.log(np.abs(data_standardized) + max(log_eps, 0))
     C_S = (L.T @ L) / float(n_samples)
 
-    E_logA, E_logA2 = compute_logA_moments(alpha=alpha_data)
+    E_logA, E_logA2 = compute_logA_moments(alpha=alpha)
     c0 = 0.25 * E_logA2
     c1 = 0.5  * E_logA
 
@@ -47,7 +46,7 @@ def estimate_shape_method2(
     correlation_matrix = np.clip(0.5 * (correlation_matrix + correlation_matrix.T), 0.0, 1.0)
     np.fill_diagonal(correlation_matrix, 1.0)
 
-    diagonal_matrix = np.diag(compute_feature_wise_power(data_centered, alpha_kernel))
+    diagonal_matrix = np.diag(compute_feature_wise_power(data_centered, alpha))
     shape_matrix = diagonal_matrix @ correlation_matrix @ diagonal_matrix
     return shape_matrix
 
