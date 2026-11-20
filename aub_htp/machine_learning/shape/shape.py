@@ -22,10 +22,7 @@ class AlphaStableShape(BaseEstimator):
     def fit(self, X, y=None):
         X = validate_data(self, X)
         X = np.asarray(X, dtype=float)
-        X_is_one_dimensional = X.ndim == 1
-        if X_is_one_dimensional:
-            X = X.reshape(-1, 1)
-        
+
         alpha_kernel, alpha_data = self._resolve_alpha_kernel_and_alpha_data()
 
 
@@ -40,10 +37,6 @@ class AlphaStableShape(BaseEstimator):
                 f"method must be one of {get_args(MethodLiteral)}, got {self.method!r}."
             )
         location = compute_feature_wise_location(X, alpha_kernel)
-        
-        if X_is_one_dimensional:
-            shape_matrix = shape_matrix.item()
-            location = location.item()
 
         self.shape_ = shape_matrix
         self.location_ = location

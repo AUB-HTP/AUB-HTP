@@ -5,17 +5,12 @@ epsilon = np.finfo(float).tiny
 
 def estimate_shape_method3(data: np.ndarray, alpha_kernel: float, alpha_data: float) -> np.ndarray:
     data = np.asarray(data)
-    data_is_one_dimensional = data.ndim == 1
-    if data_is_one_dimensional:
-        data = data.reshape(-1, 1)
     n_samples, _n_features = data.shape
 
     small_sigma = estimate_marginals(data, alpha_kernel=alpha_kernel, alpha_data=alpha_data)
     A_hat = estimate_A_hat_by_lln(data, small_sigma)
     data_normalized = data / np.maximum(np.sqrt(A_hat)[:, None], epsilon)
     shape_matrix = data_normalized.T @ data_normalized / n_samples
-    if data_is_one_dimensional:
-        return shape_matrix.item()
     return shape_matrix
 
 

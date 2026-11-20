@@ -19,9 +19,6 @@ def estimate_shape_method2(
     log_eps: float = 0.0,
 ) -> np.ndarray:
     data = np.asarray(data)
-    data_is_one_dimensional = data.ndim == 1
-    if data_is_one_dimensional:
-        data = data.reshape(-1, 1)
     n_samples, n_features = data.shape
 
     small_sigma = estimate_marginals(data, alpha_kernel=alpha_kernel, alpha_data=alpha_data)
@@ -39,21 +36,19 @@ def estimate_shape_method2(
 
     C_G = C_S - c0 - (2.0 * c1 * E_LOG_ABS_Z)
 
-    coorolation_matrix = np.eye(n_features, dtype=float)
+    correlation_matrix = np.eye(n_features, dtype=float)
     iu = np.triu_indices(n_features, 1)
     F_off = C_G[iu]
     
     rho_vals = get_f_to_rho_interpolator()(F_off)
-    coorolation_matrix[iu] = rho_vals
-    coorolation_matrix[(iu[1], iu[0])] = rho_vals
+    correlation_matrix[iu] = rho_vals
+    correlation_matrix[(iu[1], iu[0])] = rho_vals
 
-    coorolation_matrix = np.clip(0.5 * (coorolation_matrix + coorolation_matrix.T), 0.0, 1.0)
-    np.fill_diagonal(coorolation_matrix, 1.0)
+    correlation_matrix = np.clip(0.5 * (correlation_matrix + correlation_matrix.T), 0.0, 1.0)
+    np.fill_diagonal(correlation_matrix, 1.0)
 
     diagonal_matrix = np.diag(compute_feature_wise_power(data_centered, alpha_kernel))
-    shape_matrix = diagonal_matrix @ coorolation_matrix @ diagonal_matrix
-    if data_is_one_dimensional:
-        return shape_matrix.item()
+    shape_matrix = diagonal_matrix @ correlation_matrix @ diagonal_matrix
     return shape_matrix
 
 @lru_cache(maxsize=None)
