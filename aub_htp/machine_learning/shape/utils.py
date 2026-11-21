@@ -35,9 +35,11 @@ def repair_correlation_matrix(correlation_matrix: np.ndarray, *, eps: float = 2.
     Pairwise estimates of rho_ij need not form a PSD matrix. If R = Q diag(lambda) Q^T
     has a negative eigenvalue, the negative ones are set to eps, R is rebuilt, and it
     is rescaled so its diagonal is 1 again. A warning is raised when this happens.
+
+    Raises ValueError if R has NaN or infinite entries.
     """
     if not np.all(np.isfinite(correlation_matrix)):
-        return correlation_matrix
+        raise ValueError("The estimated correlation matrix has NaN or infinite entries.")
 
     n_features = correlation_matrix.shape[0]
     eigenvalues, eigenvectors = np.linalg.eigh(correlation_matrix)

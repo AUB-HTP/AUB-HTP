@@ -14,8 +14,8 @@ def estimate_correlation_sheppard(data: np.ndarray) -> np.ndarray:
         rho_ij = sin(pi (p - 1/2))
 
     p is estimated as #(x_i x_j > 0) / #(x_i x_j != 0). Rows where the product is
-    exactly 0 are left out, so they don't count as negative. A pair with no rows left
-    gets rho_ij = 0, with a warning.
+    exactly 0 are left out, so they don't count as negative. A pair with fewer than
+    2 rows left gets rho_ij = 0, with a warning.
     """
     signs = np.sign(data)
     # (S^T S)_ij = #(x_i x_j > 0) - #(x_i x_j < 0)
@@ -24,11 +24,11 @@ def estimate_correlation_sheppard(data: np.ndarray) -> np.ndarray:
     # (|S|^T |S|)_ij = #(x_i x_j != 0)
     nonzero = is_nonzero.T @ is_nonzero
 
-    has_samples = nonzero > 0
+    has_samples = nonzero >= 2
     if not has_samples.all():
         warn_pairs_without_samples()
 
-    # p - 1/2 = (#positive - #negative) / (2 #nonzero), or 0 for a pair with no samples.
+    # p - 1/2 = (#positive - #negative) / (2 #nonzero), or 0 for a pair with fewer than 2 samples.
     p_minus_half = np.divide(
         positive_minus_negative, 2.0 * nonzero, out=np.zeros_like(nonzero), where=has_samples
     )
