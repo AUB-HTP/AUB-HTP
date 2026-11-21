@@ -226,7 +226,7 @@ def _h_real_imag_general(x, beta, alpha, n, quad_limit):
     return HR, HI
 
 
-def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
+def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
                       max_panels=400_000):
     """``g_{alpha,d}`` (``alpha != 1``) straight from definition (1).
 
@@ -244,7 +244,9 @@ def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
     u_max = float(min(39.0 ** (1.0 / alpha), 1.0e5))
     v_max = max(float(np.max(np.abs(v))), 1e-3)
     n_panels = int(np.ceil(per_period * v_max * u_max / (2.0 * np.pi)))
-    n_panels = max(n_panels, 4096)
+    # alpha < 0.6 needs many panels near u = 0 (u**alpha is steep there);
+    # above that, about u_max panels reach ~1e-7 against mpmath.
+    n_panels = max(n_panels, 4096 if alpha < 0.6 else max(64, int(np.ceil(2 * u_max))))
     if n_panels > max_panels:
         import warnings
         warnings.warn(
@@ -334,6 +336,24 @@ def _g_general(v, beta, alpha, d, quad_limit):
         g[zero] = _g_at_zero(beta[zero], alpha, d, quad_limit)
     return g
 
+_DIRECT_BANDS = (0.0, 1.0, 10.0, 100.0, np.inf)
+
+
+def _g_general_direct(v, beta, alpha, d, **kwargs):
+    """Definition (1), evaluated band by band in |v|.
+
+    The panel count grows with the largest |v| in a call, so small |v| are
+    computed separately and do not pay for the large ones.
+    """
+    v = np.atleast_1d(np.asarray(v, dtype=np.float64))
+    beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
+    out = np.empty(v.shape, dtype=np.float64)
+    mag = np.abs(v)
+    for lo, hi in zip(_DIRECT_BANDS[:-1], _DIRECT_BANDS[1:]):
+        band = (mag >= lo) & (mag < hi)
+        if np.any(band):
+            out[band] = _g_general_direct_band(v[band], beta[band], alpha, d, **kwargs)
+    return out
 
 def _g_at_zero(beta, alpha, d, quad_limit):
     """``g_{alpha,d}(0, beta)`` from definition (1) with ``v = 0``."""
