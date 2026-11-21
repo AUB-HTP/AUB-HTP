@@ -5,7 +5,7 @@ from sklearn.utils.validation import validate_data
 
 from aub_htp.statistics import alpha_location, alpha_power
 
-MethodLiteral = Literal["ratio", "log-difference", "sheppard", "tyler"]
+MethodLiteral = Literal["ratio-1", "ratio-2", "ratio-3", "log-difference", "sheppard", "tyler"]
 
 from .ratio import estimate_correlation_ratio
 from .log_difference import estimate_correlation_log_difference
@@ -13,9 +13,12 @@ from .sheppard import estimate_correlation_sheppard
 from .tyler import estimate_correlation_tyler
 from .utils import repair_correlation_matrix
 
+# The ratio methods differ only in the equation that turns the Cauchy fit into rho.
+RATIO_EQUATIONS = {"ratio-1": 1, "ratio-2": 2, "ratio-3": 3}
+
 
 class AlphaStableShape(BaseEstimator):
-    def __init__(self, alpha: float = 1.0, method: MethodLiteral = "ratio"):
+    def __init__(self, alpha: float = 1.0, method: MethodLiteral = "ratio-1"):
         self.alpha = alpha
         self.method = method
 
@@ -38,8 +41,10 @@ class AlphaStableShape(BaseEstimator):
             # Always PSD.
             correlation_matrix = estimate_correlation_tyler(X_centered)
         else:
-            if self.method == "ratio":
-                correlation_matrix = estimate_correlation_ratio(X_centered)
+            if self.method in RATIO_EQUATIONS:
+                correlation_matrix = estimate_correlation_ratio(
+                    X_centered, small_sigma, equation=RATIO_EQUATIONS[self.method]
+                )
             elif self.method == "log-difference":
                 correlation_matrix = estimate_correlation_log_difference(X_centered)
             else:

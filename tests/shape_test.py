@@ -6,14 +6,15 @@ from sklearn.exceptions import ConvergenceWarning
 
 from aub_htp.machine_learning import AlphaStableShape
 from aub_htp.machine_learning.shape import shape as shape_module
-from aub_htp.machine_learning.shape.ratio import estimate_correlation_ratio
+from aub_htp.machine_learning.shape.ratio import compute_correlation_element, estimate_correlation_ratio
 from aub_htp.machine_learning.shape.sheppard import estimate_correlation_sheppard
 from aub_htp.machine_learning.shape.tyler import estimate_correlation_tyler
 from aub_htp.machine_learning.shape.utils import repair_correlation_matrix
 
-METHODS = ["ratio", "log-difference", "sheppard", "tyler"]
+RATIO_METHODS = ["ratio-1", "ratio-2", "ratio-3"]
+METHODS = RATIO_METHODS + ["log-difference", "sheppard", "tyler"]
 # These estimate each rho_ij on its own, so their R may not be PSD.
-PAIRWISE_METHODS = ["ratio", "log-difference", "sheppard"]
+PAIRWISE_METHODS = RATIO_METHODS + ["log-difference", "sheppard"]
 ALPHAS = [1.0, 1.5, 2.0]
 RHOS = [-0.9, -0.5, 0.0, 0.5, 0.9]
 SCALES = [1e6]
@@ -73,6 +74,9 @@ def correlation_tolerance(method, rho):
             return 0.5
         if abs(rho) == 0.5:
             return 0.25
+    # ratio-2 takes |rho| from sqrt(1 - ...), which is biased away from 0 at rho = 0.
+    if method == "ratio-2" and rho == 0.0:
+        return 0.3
     # A strong correlation is estimated more precisely.
     if abs(rho) == 0.9:
         return 0.05
@@ -130,25 +134,49 @@ class TestAlphaStableShapeCorrectness:
 
 class TestRatioZeroHandling:
 
-    def test_rows_with_zero_denominator_are_left_out(self):
+    @pytest.mark.parametrize("equation", [1, 2, 3])
+    def test_rows_with_zero_denominator_are_left_out(self, equation):
         """Exact zeros in x_j should be skipped, not turn rho into a guess of 0."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
         X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=10)
         X[::5, 1] = 0.0
 
-        correlation_matrix = estimate_correlation_ratio(X)
+        correlation_matrix = estimate_correlation_ratio(X, SIGMA, equation=equation)
 
         assert abs(correlation_matrix[0, 1] - 0.5) < 0.1
 
-    def test_tiny_scale_data_is_not_masked(self):
+    @pytest.mark.parametrize("equation", [1, 2, 3])
+    def test_tiny_scale_data_is_not_masked(self, equation):
         """The ratio x_i / x_j has no scale, so tiny data should give the same rho."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
         X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=11)
 
-        correlation_matrix = estimate_correlation_ratio(X)
-        correlation_matrix_of_tiny = estimate_correlation_ratio(1e-20 * X)
+        correlation_matrix = estimate_correlation_ratio(X, SIGMA, equation=equation)
+        correlation_matrix_of_tiny = estimate_correlation_ratio(1e-20 * X, 1e-20 * SIGMA, equation=equation)
 
         assert np.allclose(correlation_matrix_of_tiny, correlation_matrix, rtol=0.0, atol=1e-2)
+
+
+class TestRatioEquations:
+
+    # A Cauchy fit of z = x_i / x_j for sigma_i = 1, sigma_j = 2 and rho = 0.6:
+    # mu = rho sigma_i / sigma_j = 0.3, gamma = (sigma_i / sigma_j) sqrt(1 - rho^2) = 0.4
+    @pytest.mark.parametrize("equation", [1, 2, 3])
+    @pytest.mark.parametrize("sign", [1.0, -1.0])
+    def test_each_equation_recovers_rho_from_an_exact_fit(self, equation, sign):
+        rho = compute_correlation_element(sign * 0.3, 0.4, 1.0, 2.0, equation)
+        assert np.isclose(rho, sign * 0.6, rtol=1e-12, atol=0.0)
+
+    def test_equation_2_clips_a_negative_square_root_to_zero(self):
+        """gamma too large for the sigmas gives 1 - ... < 0, which is clipped to rho = 0."""
+        assert compute_correlation_element(0.3, 0.6, 1.0, 2.0, 2) == 0.0
+
+    def test_equation_3_clips_rho_to_one(self):
+        assert compute_correlation_element(0.6, 0.4, 1.0, 2.0, 3) == 1.0
+
+    def test_rejects_unknown_equation(self):
+        with pytest.raises(ValueError):
+            compute_correlation_element(0.3, 0.4, 1.0, 2.0, 4)
 
 
 class TestSheppard:
@@ -263,8 +291,8 @@ class TestPositiveSemiDefiniteRepair:
     @pytest.mark.parametrize("method", PAIRWISE_METHODS)
     def test_fit_returns_a_psd_shape(self, method, monkeypatch):
         """fit should repair R before building shape_."""
-        name = "estimate_correlation_" + method.replace("-", "_")
-        monkeypatch.setattr(shape_module, name, lambda X: NOT_PSD.copy())
+        name = "ratio" if method in RATIO_METHODS else method.replace("-", "_")
+        monkeypatch.setattr(shape_module, "estimate_correlation_" + name, lambda *args, **kwargs: NOT_PSD.copy())
         shape_matrix = make_shape_matrix([1.0, 2.0, 0.5], np.eye(3))
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(3), seed=12)
 
@@ -344,7 +372,7 @@ class TestAlphaStableShapeValidation:
         with pytest.raises(ValueError):
             AlphaStableShape(alpha=1.0, method=method).fit(np.array([[1.0, 2.0]]))
 
-    @pytest.mark.parametrize("method", ["unknown", "method1", "method2", "method3"])
+    @pytest.mark.parametrize("method", ["unknown", "method1", "method2", "method3", "ratio"])
     def test_rejects_unknown_and_old_method_names(self, method):
         """The old names were removed without aliases."""
         X = sample_sub_gaussian(200, 1.0, np.eye(2), np.zeros(2), seed=8)
