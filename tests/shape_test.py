@@ -236,7 +236,7 @@ class TestTyler:
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=19)
         X = np.column_stack([X, X[:, 0]])
-        with pytest.raises(ValueError, match="linearly independent"):
+        with pytest.raises(ValueError, match="became singular"):
             estimate_correlation_tyler(X)
 
     def test_zero_rows_are_dropped(self):
