@@ -5,13 +5,13 @@ from sklearn.utils.validation import validate_data
 
 from aub_htp.statistics import alpha_location, alpha_power
 
-MethodLiteral = Literal["ratio-1", "ratio-2", "ratio-3", "log-difference", "sheppard", "tyler"]
-
 from .ratio import estimate_correlation_ratio
 from .log_difference import estimate_correlation_log_difference
 from .sheppard import estimate_correlation_sheppard
 from .tyler import estimate_correlation_tyler
 from .utils import repair_correlation_matrix
+
+MethodLiteral = Literal["ratio-1", "ratio-2", "ratio-3", "log-difference", "sheppard", "tyler"]
 
 # The ratio methods differ only in the equation that turns the Cauchy fit into rho.
 RATIO_EQUATIONS = {"ratio-1": 1, "ratio-2": 2, "ratio-3": 3}
@@ -46,7 +46,7 @@ class AlphaStableShape(BaseEstimator):
                     X_centered, small_sigma, equation=RATIO_EQUATIONS[self.method]
                 )
             elif self.method == "log-difference":
-                correlation_matrix = estimate_correlation_log_difference(X_centered)
+                correlation_matrix = estimate_correlation_log_difference(X_centered, small_sigma)
             else:
                 correlation_matrix = estimate_correlation_sheppard(X_centered)
             # These methods estimate each rho_ij on its own, so R may not be PSD.

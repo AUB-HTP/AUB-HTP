@@ -6,6 +6,7 @@ from sklearn.exceptions import ConvergenceWarning
 
 from aub_htp.machine_learning import AlphaStableShape
 from aub_htp.machine_learning.shape import shape as shape_module
+from aub_htp.machine_learning.shape.log_difference import estimate_correlation_log_difference
 from aub_htp.machine_learning.shape.ratio import compute_correlation_element, estimate_correlation_ratio
 from aub_htp.machine_learning.shape.sheppard import estimate_correlation_sheppard
 from aub_htp.machine_learning.shape.tyler import estimate_correlation_tyler
@@ -179,6 +180,20 @@ class TestRatioEquations:
             compute_correlation_element(0.3, 0.4, 1.0, 2.0, 4)
 
 
+class TestLogDifference:
+
+    @pytest.mark.parametrize("scale", [1e-20, 1e20])
+    def test_scaled_data_gives_the_same_correlation(self, scale):
+        """The floor on |x| is relative to sigma, so the scale of the data should not matter."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=18)
+
+        correlation_matrix = estimate_correlation_log_difference(X, SIGMA)
+        correlation_matrix_of_scaled = estimate_correlation_log_difference(scale * X, scale * SIGMA)
+
+        assert np.allclose(correlation_matrix_of_scaled, correlation_matrix, rtol=0.0, atol=1e-9)
+
+
 class TestSheppard:
 
     def test_rows_with_a_zero_product_are_left_out(self):
@@ -215,6 +230,14 @@ class TestTyler:
     def test_fit_rejects_too_few_samples(self):
         with pytest.raises(ValueError):
             AlphaStableShape(alpha=1.0, method="tyler").fit(np.array([[1.0, 2.0], [3.0, -1.0]]))
+
+    def test_rejects_linearly_dependent_features(self):
+        """A repeated feature makes the estimate singular, which should be a ValueError."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=19)
+        X = np.column_stack([X, X[:, 0]])
+        with pytest.raises(ValueError, match="linearly independent"):
+            estimate_correlation_tyler(X)
 
     def test_zero_rows_are_dropped(self):
         """Adding rows equal to 0 should not change the result."""

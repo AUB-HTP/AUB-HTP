@@ -5,9 +5,17 @@ import numpy as np
 MAX_LOG_DIFFERENCE_VARIANCE: float = np.pi ** 2 / 4.0
 
 
-def estimate_correlation_log_difference(data: np.ndarray, *, log_eps: float = 2.0 ** -20) -> np.ndarray:
+def estimate_correlation_log_difference(
+    data: np.ndarray,
+    small_sigma: np.ndarray,
+    *,
+    log_eps: float = 2.0 ** -20,
+) -> np.ndarray:
     """
     Estimate the correlation matrix R of centered data.
+
+    Each feature is divided by small_sigma first, so the floor log_eps is relative to the feature's scale.
+    This only shifts log|x_i| by a constant, so the variance below is unchanged.
 
     Each row is sqrt(A) G with G_i = sigma_i Z_i and Z ~ N(0, R), so A cancels in
     log|x_i| - log|x_j| = log(sigma_i / sigma_j) + log|Z_i| - log|Z_j|, and
@@ -17,9 +25,11 @@ def estimate_correlation_log_difference(data: np.ndarray, *, log_eps: float = 2.
     which gives |rho_ij|. The sign comes from Sheppard's formula:
     P(x_i x_j > 0) = 1/2 + arcsin(rho_ij) / pi, so sgn(rho_ij) = sgn(2 p - 1).
     """
-    _, n_features = data.shape
+    small_sigma = np.asarray(small_sigma, dtype=float).reshape(-1)
+    # A feature with sigma_i = 0 is all zeros, so it is left as it is.
+    scale = np.where(small_sigma > 0, small_sigma, 1.0)
 
-    log_abs = np.log(np.maximum(np.abs(data), log_eps))
+    log_abs = np.log(np.maximum(np.abs(data) / scale, log_eps))
     log_covariance = np.atleast_2d(np.cov(log_abs, rowvar=False))
     log_variance = np.diag(log_covariance)
     # Var(L_i - L_j) = Var(L_i) + Var(L_j) - 2 Cov(L_i, L_j)

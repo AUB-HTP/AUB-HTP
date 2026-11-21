@@ -22,7 +22,8 @@ def estimate_correlation_tyler(
     until the largest change of an entry is below eps, or `iterations` is reached.
     Then R = D^(-1/2) S D^(-1/2) with D = diag(S), which is always PSD.
 
-    Rows equal to 0 are dropped. It needs more rows than features.
+    Rows equal to 0 are dropped. It needs more rows than features, and features that
+    are linearly independent; otherwise it raises ValueError.
     """
     _, n_features = data.shape
 
@@ -41,7 +42,12 @@ def estimate_correlation_tyler(
     S = np.eye(n_features, dtype=float)
     for _ in range(iterations):
         # q_k = u_k^T S^-1 u_k = ||L^-1 u_k||^2, with S = L L^T
-        L = np.linalg.cholesky(S)
+        try:
+            L = np.linalg.cholesky(S)
+        except np.linalg.LinAlgError:
+            raise ValueError(
+                "The tyler method's shape estimate became singular."
+            ) from None
         q = np.sum(solve_triangular(L, directions.T, lower=True) ** 2, axis=0)
 
         S_new = n_features / n_samples * directions.T @ (directions / q[:, None])

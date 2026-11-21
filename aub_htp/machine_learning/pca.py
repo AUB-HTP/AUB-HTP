@@ -4,7 +4,7 @@ from .shape import AlphaStableShape, MethodLiteral
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils.validation import validate_data
 
-def get_principal_components(X: np.ndarray, alpha: float, shape_estimation_method: MethodLiteral = "ratio-1") -> np.ndarray:
+def get_principal_components(X: np.ndarray, alpha: float, shape_estimation_method: MethodLiteral = "ratio-1") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     X = np.asarray(X, dtype=float)
     assert X.ndim == 2
     shape_estimator = AlphaStableShape(alpha=alpha, method=shape_estimation_method).fit(X)
