@@ -147,6 +147,19 @@ class TestRatioZeroHandling:
         assert abs(correlation_matrix[0, 1] - 0.5) < 0.1
 
     @pytest.mark.parametrize("equation", [1, 2, 3])
+    def test_rows_with_zero_numerator_are_left_out(self, equation):
+        """Exact zeros in x_i should be skipped too: the result is the same as without those rows."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=10)
+        X_with_zeros = X.copy()
+        X_with_zeros[::2, 0] = 0.0
+
+        correlation_matrix = estimate_correlation_ratio(X[1::2], SIGMA, equation=equation)
+        correlation_matrix_with_zeros = estimate_correlation_ratio(X_with_zeros, SIGMA, equation=equation)
+
+        assert np.array_equal(correlation_matrix_with_zeros, correlation_matrix)
+
+    @pytest.mark.parametrize("equation", [1, 2, 3])
     def test_tiny_scale_data_is_not_masked(self, equation):
         """The ratio x_i / x_j has no scale, so tiny data should give the same rho."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])

@@ -16,11 +16,11 @@ def estimate_correlation_ratio(
     """
     Estimate correlation matrix R using the ratio trick:
 
-        z_ij = X_i / X_j  (assuming centered data; rows with X_j = 0 are left out)
+        z_ij = X_i / X_j  (assuming centered data; rows with X_i = 0 or X_j = 0 are left out)
         Fit Cauchy(z_ij) → (μ_ij, γ_ij)
         Convert to ρ_ij with the selected equation (see compute_correlation_element).
 
-    A pair with fewer than 2 ratios, or whose ratios are all 0, gets ρ_ij = 0, with a warning.
+    A pair with fewer than 2 ratios gets ρ_ij = 0, with a warning.
 
     small_sigma holds σ_i = √Σ_ii for each feature. Only equations 2 and 3 use it.
 
@@ -38,9 +38,9 @@ def estimate_correlation_ratio(
         num_i = data[:, i]
         for j in range(i + 1, d):
             den_j = data[:, j]
-            mask = den_j != 0
-            # rho_ij stays 0 if there are too few ratios to fit, or if they are all 0.
-            if mask.sum() < 2 or not np.any(num_i[mask]):
+            mask = (num_i != 0) & (den_j != 0)
+            # rho_ij stays 0 if there are too few ratios to fit.
+            if mask.sum() < 2:
                 has_pair_without_samples = True
                 continue
             z = num_i[mask] / den_j[mask]
