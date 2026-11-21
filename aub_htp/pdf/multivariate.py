@@ -227,14 +227,15 @@ def _h_real_imag_general(x, beta, alpha, n, quad_limit):
 
 
 def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
-                      max_panels=400_000):
+                           max_panels=400_000):
     """``g_{alpha,d}`` (``alpha != 1``) straight from definition (1).
 
     Composite Gauss-Legendre on ``[0, u_max]`` with the panel count matched to
     the ``cos(v u - ...)`` oscillation.  ``exp(-u^alpha)`` decays slowly for
     small ``alpha``, so ``u_max`` -- and hence the cost -- grows like
-    ``39^(1/alpha)``.  Used only where the finite-interval kernel breaks down
-    (``alpha < 1`` at ``|beta| = 1``), so the extra cost is confined.
+    ``39^(1/alpha)``.  Used where the finite-interval kernel is unreliable:
+    alpha < 1 at |beta| = 1, and |v| <= _direct_cutoff(alpha).
+    Called through _g_general_direct, which splits v into bands.
     """
     v = np.atleast_1d(np.asarray(v, dtype=np.float64))
     beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
@@ -245,7 +246,7 @@ def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
     v_max = max(float(np.max(np.abs(v))), 1e-3)
     n_panels = int(np.ceil(per_period * v_max * u_max / (2.0 * np.pi)))
     # alpha < 0.6 needs many panels near u = 0 (u**alpha is steep there);
-    # above that, about u_max panels reach ~1e-7 against mpmath.
+    # above that, 2 u_max panels reach ~1e-8 against mpmath.
     n_panels = max(n_panels, 4096 if alpha < 0.6 else max(64, int(np.ceil(2 * u_max))))
     if n_panels > max_panels:
         import warnings
@@ -269,6 +270,7 @@ def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
         total += half * (np.cos(phase) @ amp)
     return total / (2.0 * np.pi) ** d
 
+
 def _direct_cutoff(alpha):
     """|v| below which g is computed from definition (1) instead of the h-function.
 
@@ -281,6 +283,7 @@ def _direct_cutoff(alpha):
     if alpha >= 0.95:
         return np.inf
     return 10.0 if alpha >= 0.6 else 1e-3
+
 
 def _g_general(v, beta, alpha, d, quad_limit):
     """``g_{alpha,d}`` for ``alpha != 1`` via the h-function representation.
@@ -336,6 +339,7 @@ def _g_general(v, beta, alpha, d, quad_limit):
         g[zero] = _g_at_zero(beta[zero], alpha, d, quad_limit)
     return g
 
+
 _DIRECT_BANDS = (0.0, 1.0, 10.0, 100.0, np.inf)
 
 
@@ -354,6 +358,7 @@ def _g_general_direct(v, beta, alpha, d, **kwargs):
         if np.any(band):
             out[band] = _g_general_direct_band(v[band], beta[band], alpha, d, **kwargs)
     return out
+
 
 def _g_at_zero(beta, alpha, d, quad_limit):
     """``g_{alpha,d}(0, beta)`` from definition (1) with ``v = 0``."""
