@@ -193,6 +193,85 @@ class TestLogDifference:
 
         assert np.allclose(correlation_matrix_of_scaled, correlation_matrix, rtol=0.0, atol=1e-9)
 
+    def test_exact_zeros_are_left_out(self):
+        """Exact zeros have no log, so they should be skipped, not turn rho into 0."""
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=21)
+        X_with_zeros = X.copy()
+        X_with_zeros[::20, 1] = 0.0
+
+        correlation_matrix = estimate_correlation_log_difference(X, SIGMA)
+        correlation_matrix_with_zeros = estimate_correlation_log_difference(X_with_zeros, SIGMA)
+
+        assert abs(correlation_matrix_with_zeros[0, 1] - correlation_matrix[0, 1]) < 0.05
+
+    def test_rows_of_zeros_do_not_change_the_result(self):
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=22)
+        X_with_zeros = np.vstack([X, np.zeros((N_SAMPLES, 2))])
+
+        correlation_matrix = estimate_correlation_log_difference(X, SIGMA)
+        correlation_matrix_with_zeros = estimate_correlation_log_difference(X_with_zeros, SIGMA)
+
+        assert np.allclose(correlation_matrix_with_zeros, correlation_matrix, rtol=0.0, atol=1e-9)
+
+
+# Two correlated features and a feature of zeros, which has no usable rows with the others.
+ZERO_FEATURE_SIGMA = np.array([1.0, 2.0, 0.0])
+
+
+def sample_with_a_zero_feature():
+    shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+    X = sample_sub_gaussian(200, 1.0, shape_matrix, np.zeros(2), seed=23)
+    return np.column_stack([X, np.zeros(200)])
+
+
+class TestPairsWithoutSamples:
+    """A pair with no usable rows should get rho = 0 and a warning, not NaN."""
+
+    @pytest.mark.parametrize("equation", [1, 2, 3])
+    @pytest.mark.parametrize("order", [[0, 1, 2], [2, 0, 1]])
+    def test_ratio(self, equation, order):
+        """The feature of zeros is a denominator when it is last, and a numerator when it is first."""
+        X = sample_with_a_zero_feature()[:, order]
+        sigma = ZERO_FEATURE_SIGMA[order]
+
+        with pytest.warns(UserWarning, match="fewer than 2 samples"):
+            correlation_matrix = estimate_correlation_ratio(X, sigma, equation=equation)
+
+        assert_zero_feature_is_uncorrelated(correlation_matrix, sigma)
+
+    def test_sheppard(self):
+        with pytest.warns(UserWarning, match="fewer than 2 samples"):
+            correlation_matrix = estimate_correlation_sheppard(sample_with_a_zero_feature())
+
+        assert_zero_feature_is_uncorrelated(correlation_matrix, ZERO_FEATURE_SIGMA)
+
+    def test_log_difference(self):
+        with pytest.warns(UserWarning, match="fewer than 2 samples"):
+            correlation_matrix = estimate_correlation_log_difference(
+                sample_with_a_zero_feature(), ZERO_FEATURE_SIGMA
+            )
+
+        assert_zero_feature_is_uncorrelated(correlation_matrix, ZERO_FEATURE_SIGMA)
+
+    @pytest.mark.parametrize("method", PAIRWISE_METHODS)
+    def test_no_warning_when_every_pair_has_samples(self, method):
+        shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(200, 1.0, shape_matrix, np.zeros(2), seed=24)
+        with warnings.catch_warnings():
+            # Only UserWarning: the Powell fits raise RuntimeWarnings of their own.
+            warnings.simplefilter("error", UserWarning)
+            AlphaStableShape(alpha=1.0, method=method).fit(X)
+
+
+def assert_zero_feature_is_uncorrelated(correlation_matrix, sigma):
+    zero_feature = int(np.argmin(sigma))
+    expected = np.zeros(3)
+    expected[zero_feature] = 1.0
+    assert np.all(np.isfinite(correlation_matrix))
+    assert np.array_equal(correlation_matrix[zero_feature], expected)
+
 
 class TestSheppard:
 
@@ -219,13 +298,13 @@ class TestTyler:
     def test_rejects_too_few_samples(self):
         """Tyler needs more samples than features."""
         with pytest.raises(ValueError):
-            estimate_correlation_tyler(np.array([[1.0, 2.0], [3.0, -1.0]]))
+            estimate_correlation_tyler(np.array([[1.0, 2.0], [3.0, -1.0]]), np.ones(2))
 
     def test_zero_rows_do_not_count_as_samples(self):
         """Rows equal to 0 are dropped before counting samples."""
         X = np.array([[1.0, 2.0], [3.0, -1.0], [0.0, 0.0], [0.0, 0.0]])
         with pytest.raises(ValueError):
-            estimate_correlation_tyler(X)
+            estimate_correlation_tyler(X, np.ones(2))
 
     def test_fit_rejects_too_few_samples(self):
         with pytest.raises(ValueError):
@@ -237,7 +316,7 @@ class TestTyler:
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=19)
         X = np.column_stack([X, X[:, 0]])
         with pytest.raises(ValueError, match="became singular"):
-            estimate_correlation_tyler(X)
+            estimate_correlation_tyler(X, np.ones(3))
 
     def test_zero_rows_are_dropped(self):
         """Adding rows equal to 0 should not change the result."""
@@ -245,8 +324,8 @@ class TestTyler:
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=14)
         X_with_zeros = np.vstack([X, np.zeros((100, 2))])
 
-        correlation_matrix = estimate_correlation_tyler(X)
-        correlation_matrix_with_zeros = estimate_correlation_tyler(X_with_zeros)
+        correlation_matrix = estimate_correlation_tyler(X, SIGMA)
+        correlation_matrix_with_zeros = estimate_correlation_tyler(X_with_zeros, SIGMA)
 
         assert np.allclose(correlation_matrix_with_zeros, correlation_matrix, rtol=0.0, atol=1e-12)
 
@@ -254,31 +333,43 @@ class TestTyler:
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.9], [0.9, 1.0]])
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=15)
         with pytest.warns(ConvergenceWarning):
-            estimate_correlation_tyler(X, iterations=1)
+            estimate_correlation_tyler(X, SIGMA, iterations=1)
 
     def test_converges_without_warning(self):
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.9], [0.9, 1.0]])
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=15)
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            estimate_correlation_tyler(X)
+            estimate_correlation_tyler(X, SIGMA)
 
     def test_huge_rows_do_not_overflow(self):
         """Rows are normalized, so entries near the largest float should be fine."""
         shape_matrix = make_shape_matrix(SIGMA, [[1.0, 0.5], [0.5, 1.0]])
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(2), seed=16)
 
-        correlation_matrix = estimate_correlation_tyler(X)
-        correlation_matrix_of_huge = estimate_correlation_tyler(1e300 * X)
+        correlation_matrix = estimate_correlation_tyler(X, SIGMA)
+        correlation_matrix_of_huge = estimate_correlation_tyler(1e300 * X, 1e300 * SIGMA)
 
         assert np.allclose(correlation_matrix_of_huge, correlation_matrix, rtol=0.0, atol=1e-9)
+
+    @pytest.mark.parametrize("feature_scale", [1e-9, 1e-6, 1e-3, 1e3, 1e6])
+    def test_feature_scale_does_not_change_the_correlation(self, feature_scale):
+        """Features are divided by sigma, so one tiny or huge feature should give the same R."""
+        shape_matrix = make_shape_matrix([1.0, 1.0], [[1.0, 0.5], [0.5, 1.0]])
+        X = sample_sub_gaussian(N_SAMPLES, 1.0, shape_matrix, np.zeros(2), seed=20)
+        scales = np.array([1.0, feature_scale])
+
+        correlation_matrix = estimate_correlation_tyler(X, np.ones(2))
+        correlation_matrix_of_scaled = estimate_correlation_tyler(scales * X, scales)
+
+        assert np.allclose(correlation_matrix_of_scaled, correlation_matrix, rtol=0.0, atol=1e-9)
 
     def test_result_is_psd(self):
         correlation_matrix = [[1.0, 0.8, -0.5], [0.8, 1.0, -0.3], [-0.5, -0.3, 1.0]]
         shape_matrix = make_shape_matrix([1.0, 0.5, 3.0], correlation_matrix)
         X = sample_sub_gaussian(500, 1.0, shape_matrix, np.zeros(3), seed=17)
 
-        estimate = estimate_correlation_tyler(X)
+        estimate = estimate_correlation_tyler(X, np.array([1.0, 0.5, 3.0]))
 
         assert np.linalg.eigvalsh(estimate).min() > 0
         assert np.allclose(np.diag(estimate), 1.0, rtol=0.0, atol=1e-12)

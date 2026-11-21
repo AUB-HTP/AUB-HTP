@@ -3,15 +3,22 @@ import numpy as np
 from scipy.linalg import solve_triangular
 from sklearn.exceptions import ConvergenceWarning
 
+from .utils import divide_by_sigma
+
 
 def estimate_correlation_tyler(
     data: np.ndarray,
+    small_sigma: np.ndarray,
     *,
     eps: float = 2.0 ** -20,
     iterations: int = 100,
 ) -> np.ndarray:
     """
     Estimate the correlation matrix R of centered data with Tyler's M-estimator.
+
+    Each feature is divided by small_sigma first. Tyler's estimate of D^-1 x is
+    D^-1 S D^-1, which has the same R, so this does not change the result. It makes
+    the entries of S about the same size, so that eps means the same for all of them.
 
     Each row is sqrt(A) G, so its direction u = x / ||x|| = G / ||G|| does not depend
     on A. Tyler's estimator (Tyler 1987) is the MLE of the shape matrix from these
@@ -26,6 +33,7 @@ def estimate_correlation_tyler(
     are linearly independent; otherwise it raises ValueError.
     """
     _, n_features = data.shape
+    data = divide_by_sigma(data, small_sigma)
 
     # Divide each row by its largest entry first, so huge rows don't overflow the norm.
     largest_entry = np.max(np.abs(data), axis=1)

@@ -12,6 +12,22 @@ def compute_feature_wise_power(data: np.ndarray, alpha: float) -> np.ndarray:
     return power
 
 
+def divide_by_sigma(data: np.ndarray, small_sigma: np.ndarray) -> np.ndarray:
+    """Divide each feature by its sigma_i. A feature with sigma_i = 0 is all zeros, so it is left as it is."""
+    small_sigma = np.asarray(small_sigma, dtype=float).reshape(-1)
+    return data / np.where(small_sigma > 0, small_sigma, 1.0)
+
+
+def warn_pairs_without_samples() -> None:
+    """Warn that some rho_ij could not be estimated and were set to 0."""
+    warnings.warn(
+        "Some pairs of features have fewer than 2 samples where both are non-zero. "
+        "Their correlation was set to 0.",
+        UserWarning,
+        stacklevel=4,  # the caller of fit
+    )
+
+
 def repair_correlation_matrix(correlation_matrix: np.ndarray, *, eps: float = 2.0 ** -20) -> np.ndarray:
     """
     Make a correlation matrix positive semi-definite.

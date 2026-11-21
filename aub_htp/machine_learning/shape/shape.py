@@ -39,7 +39,7 @@ class AlphaStableShape(BaseEstimator):
 
         if self.method == "tyler":
             # Always PSD.
-            correlation_matrix = estimate_correlation_tyler(X_centered)
+            correlation_matrix = estimate_correlation_tyler(X_centered, small_sigma)
         else:
             if self.method in RATIO_EQUATIONS:
                 correlation_matrix = estimate_correlation_ratio(

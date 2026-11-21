@@ -1,5 +1,7 @@
 import numpy as np
 
+from .utils import divide_by_sigma, warn_pairs_without_samples
+
 
 # Var(log|Z_i| - log|Z_j|) at rho = 0, for standard normals Z_i, Z_j.
 MAX_LOG_DIFFERENCE_VARIANCE: float = np.pi ** 2 / 4.0
@@ -24,27 +26,37 @@ def estimate_correlation_log_difference(
 
     which gives |rho_ij|. The sign comes from Sheppard's formula:
     P(x_i x_j > 0) = 1/2 + arcsin(rho_ij) / pi, so sgn(rho_ij) = sgn(2 p - 1).
+
+    log|0| is not defined, so rows with x_i = 0 or x_j = 0 are left out of the variance.
+    A pair with fewer than 2 rows left gets rho_ij = 0, with a warning.
     """
-    small_sigma = np.asarray(small_sigma, dtype=float).reshape(-1)
-    # A feature with sigma_i = 0 is all zeros, so it is left as it is.
-    scale = np.where(small_sigma > 0, small_sigma, 1.0)
+    _, n_features = data.shape
+    data = divide_by_sigma(data, small_sigma)
 
-    log_abs = np.log(np.maximum(np.abs(data) / scale, log_eps))
-    log_covariance = np.atleast_2d(np.cov(log_abs, rowvar=False))
-    log_variance = np.diag(log_covariance)
-    # Var(L_i - L_j) = Var(L_i) + Var(L_j) - 2 Cov(L_i, L_j)
-    difference_variance = log_variance[:, None] + log_variance[None, :] - 2.0 * log_covariance
+    log_abs = np.log(np.maximum(np.abs(data), log_eps))
+    is_nonzero = data != 0
 
-    arcsin_squared = np.clip(
-        MAX_LOG_DIFFERENCE_VARIANCE - difference_variance, 0.0, MAX_LOG_DIFFERENCE_VARIANCE
-    )
-    absolute_correlation = np.sin(np.sqrt(arcsin_squared))
+    absolute_correlation = np.eye(n_features, dtype=float)
+    has_pair_without_samples = False
+    for i in range(n_features):
+        for j in range(i + 1, n_features):
+            mask = is_nonzero[:, i] & is_nonzero[:, j]
+            if mask.sum() < 2:
+                has_pair_without_samples = True
+                continue
+            difference_variance = np.var(log_abs[mask, i] - log_abs[mask, j], ddof=1)
+            arcsin_squared = np.clip(
+                MAX_LOG_DIFFERENCE_VARIANCE - difference_variance, 0.0, MAX_LOG_DIFFERENCE_VARIANCE
+            )
+            absolute_correlation[i, j] = absolute_correlation[j, i] = np.sin(np.sqrt(arcsin_squared))
+
+    if has_pair_without_samples:
+        warn_pairs_without_samples()
 
     # (S^T S)_ij = #(x_i x_j > 0) - #(x_i x_j < 0), which has the sign of 2 p - 1.
     signs = np.sign(data)
     correlation_sign = np.sign(signs.T @ signs)
 
     correlation_matrix = correlation_sign * absolute_correlation
-    correlation_matrix = 0.5 * (correlation_matrix + correlation_matrix.T)
     np.fill_diagonal(correlation_matrix, 1.0)
     return correlation_matrix

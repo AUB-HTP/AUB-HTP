@@ -2,6 +2,8 @@ from typing import Literal
 import numpy as np
 from aub_htp.statistics import alpha_location, alpha_power
 
+from .utils import warn_pairs_without_samples
+
 RatioEquationLiteral = Literal[1, 2, 3]
 
 
@@ -18,6 +20,8 @@ def estimate_correlation_ratio(
         Fit Cauchy(z_ij) → (μ_ij, γ_ij)
         Convert to ρ_ij with the selected equation (see compute_correlation_element).
 
+    A pair with fewer than 2 ratios, or whose ratios are all 0, gets ρ_ij = 0, with a warning.
+
     small_sigma holds σ_i = √Σ_ii for each feature. Only equations 2 and 3 use it.
 
     Returns
@@ -27,6 +31,7 @@ def estimate_correlation_ratio(
     _, d = data.shape
     small_sigma = np.asarray(small_sigma, dtype=float).reshape(-1)
     correlation_matrix = np.eye(d, dtype=float)
+    has_pair_without_samples = False
 
     # Full pairwise computation
     for i in range(d):
@@ -34,10 +39,17 @@ def estimate_correlation_ratio(
         for j in range(i + 1, d):
             den_j = data[:, j]
             mask = den_j != 0
+            # rho_ij stays 0 if there are too few ratios to fit, or if they are all 0.
+            if mask.sum() < 2 or not np.any(num_i[mask]):
+                has_pair_without_samples = True
+                continue
             z = num_i[mask] / den_j[mask]
             mu_ij, gam_ij = fit_cauchy_1d(z)
             rho = compute_correlation_element(mu_ij, gam_ij, small_sigma[i], small_sigma[j], equation)
             correlation_matrix[i, j] = correlation_matrix[j, i] = float(np.clip(rho, -1.0, 1.0))
+
+    if has_pair_without_samples:
+        warn_pairs_without_samples()
 
     # Symmetrize & normalize
     correlation_matrix = 0.5 * (correlation_matrix + correlation_matrix.T)
