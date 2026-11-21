@@ -244,7 +244,7 @@ def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
     u_max = float(min(39.0 ** (1.0 / alpha), 1.0e5))
     v_max = max(float(np.max(np.abs(v))), 1e-3)
     n_panels = int(np.ceil(per_period * v_max * u_max / (2.0 * np.pi)))
-    n_panels = max(n_panels, 64)
+    n_panels = max(n_panels, 4096)
     if n_panels > max_panels:
         import warnings
         warnings.warn(
@@ -267,9 +267,34 @@ def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
         total += half * (np.cos(phase) @ amp)
     return total / (2.0 * np.pi) ** d
 
+def _direct_cutoff(alpha):
+    """|v| below which g is computed from definition (1) instead of the h-function.
+
+    For alpha < 1 the h-function integrand concentrates in a narrow region as
+    |v| -> 0 (and, near alpha = 1, at larger |v|). quad_vec can miss it and
+    return 0, and the result depends on which other v share the call.
+    """
+    if alpha >= 1.0:
+        return 0.0
+    if alpha >= 0.95:
+        return np.inf
+    return 10.0 if alpha >= 0.6 else 1e-3
 
 def _g_general(v, beta, alpha, d, quad_limit):
-    """``g_{alpha,d}`` for ``alpha != 1`` via the h-function representation."""
+    """``g_{alpha,d}`` for ``alpha != 1`` via the h-function representation.
+
+    Values with |v| <= _direct_cutoff(alpha) are computed from definition (1).
+    """
+    v = np.asarray(v, dtype=np.float64)
+    beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
+    near = np.abs(v) <= _direct_cutoff(alpha)
+    if np.any(near):
+        g = np.empty(v.shape, dtype=np.float64)
+        g[near] = _g_general_direct(v[near], beta[near], alpha, d)
+        if not np.all(near):
+            g[~near] = _g_general(v[~near], beta[~near], alpha, d, quad_limit)
+        return g
+
     n = d - 1
     tan_h = np.tan(np.pi * alpha / 2.0)
     c0 = 1.0 / np.sqrt(1.0 + (beta * tan_h) ** 2)          # cos(alpha*theta0)
