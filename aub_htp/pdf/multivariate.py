@@ -341,11 +341,11 @@ def _g_general(v, beta, alpha, d, quad_limit):
     return g
 
 
-_DIRECT_BANDS = (0.0, 1.0, 10.0, 100.0, np.inf)
+_DIRECT_N_BANDS = 4
 
 
 def _g_general_direct(v, beta, alpha, d, **kwargs):
-    """Definition (1), evaluated band by band in |v|.
+    """Definition (1), evaluated in groups of equal size by |v| (quartiles).
 
     The panel count grows with the largest |v| in a call, so small |v| are
     computed separately and do not pay for the large ones.
@@ -353,11 +353,11 @@ def _g_general_direct(v, beta, alpha, d, **kwargs):
     v = np.atleast_1d(np.asarray(v, dtype=np.float64))
     beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
     out = np.empty(v.shape, dtype=np.float64)
-    mag = np.abs(v)
-    for lo, hi in zip(_DIRECT_BANDS[:-1], _DIRECT_BANDS[1:]):
-        band = (mag >= lo) & (mag < hi)
-        if np.any(band):
-            out[band] = _g_general_direct_band(v[band], beta[band], alpha, d, **kwargs)
+    if v.size == 0:
+        return out
+    order = np.argsort(np.abs(v), kind="stable")
+    for idx in np.array_split(order, min(_DIRECT_N_BANDS, v.size)):
+        out[idx] = _g_general_direct_band(v[idx], beta[idx], alpha, d, **kwargs)
     return out
 
 
