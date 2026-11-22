@@ -275,15 +275,14 @@ def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
 def _direct_cutoff(alpha):
     """|v| below which g is computed from definition (1) instead of the h-function.
 
-    For alpha < 1 the h-function integrand concentrates in a narrow region as
-    |v| -> 0 (and, near alpha = 1, at larger |v|). quad_vec can miss it and
-    return 0, and the result depends on which other v share the call.
+    For alpha < 1 the h-function integrand concentrates in a narrow region,
+    and quad_vec can miss it. The largest failing small |v| is about
+    10**(10 alpha - 9.2); the cutoff adds a factor of 1000, which also covers
+    isolated failures at |v| <= 1000 for alpha >= 0.95.
     """
     if alpha >= 1.0:
         return 0.0
-    if alpha >= 0.95:
-        return np.inf
-    return 10.0 if alpha >= 0.6 else 1e-3
+    return 10.0 ** (10.0 * alpha - 6.2)
 
 
 def _g_general(v, beta, alpha, d, quad_limit):
@@ -332,6 +331,13 @@ def _g_general(v, beta, alpha, d, quad_limit):
         if np.any(degenerate):
             g[degenerate] = _g_general_direct(v[degenerate], beta[degenerate],
                                               alpha, d)
+
+    # quad_vec can also miss the integrand at isolated large |v| near alpha = 1
+    # and return exactly 0; recompute those from definition (1).
+    if alpha < 1.0:
+        missed = (g == 0.0) & (x_abs > 1e-9) & (np.abs(beta_star) <= 1.0 - 1e-6)
+        if np.any(missed):
+            g[missed] = _g_general_direct(v[missed], beta[missed], alpha, d)
 
     # x = 0 is a removable singularity of the finite-interval kernel (r has x in
     # its denominator); evaluate definition (1) directly there.
