@@ -248,9 +248,7 @@ def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
     # waves of v u plus waves of beta tau u^alpha over [0, u_max]
     phase = v_max * u_max + beta_max * abs(tau) * u_max ** alpha
     n_panels = int(np.ceil(per_period * phase / (2.0 * np.pi)))
-    # alpha < 0.6 needs many panels near u = 0 (u**alpha is steep there);
-    # above that, 2 u_max panels reach ~1e-8 against mpmath.
-    n_panels = max(n_panels, 4096 if alpha < 0.6 else max(64, int(np.ceil(2 * u_max))))
+    n_panels = max(n_panels, 4096, int(np.ceil(2 * u_max)))
     if n_panels > max_panels:
         import warnings
         warnings.warn(
