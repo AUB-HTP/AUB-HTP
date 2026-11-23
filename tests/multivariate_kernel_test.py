@@ -27,6 +27,8 @@ third only for even ``d``, which is why the sweep below covers ``beta`` up to
 ``+-1`` and both parities of ``d``.
 """
 
+from math import gamma
+
 import numpy as np
 import pytest
 from scipy.integrate import quad
@@ -48,7 +50,7 @@ def _reference(v, beta, alpha, d):
         def f(u):
             return (np.cos(v * u - beta * tau * u ** alpha) * u ** (d - 1)
                     * np.exp(-u ** alpha))
-        upper = float(min(39.0 ** (1.0 / alpha), 2.0e3))
+        upper = float(39.0 ** (1.0 / alpha))
 
     step = min(max(TWO_PI / max(abs(v), 1e-3), upper / 20_000.0), upper)
     edges = list(np.arange(0.0, upper, step)) + [upper]
@@ -59,20 +61,28 @@ def _reference(v, beta, alpha, d):
     return total / TWO_PI ** d
 
 
-V_POINTS = np.array([0.0, 0.3, 1.0, 2.5, -0.7, -3.0, 8.0])
+V_POINTS = np.array([0.0, 1e-6, 1e-4, 1e-2, 0.3, 1.0, 2.5, -0.7, -3.0, 8.0])
 
 
-@pytest.mark.parametrize("alpha", [0.5, 0.8, 1.0, 1.2, 1.5, 1.9])
+@pytest.mark.parametrize("alpha", [0.35, 0.4, 0.5, 0.8, 0.95, 0.99, 1.0, 1.2, 1.5, 1.9])
 @pytest.mark.parametrize("beta", [0.0, 0.001, 0.4, 1.0, -1.0])
 @pytest.mark.parametrize("d", [1, 2, 3])
 def test_kernel_matches_definition(alpha, beta, d):
-    got = g_alpha_d(V_POINTS, np.full_like(V_POINTS, beta), alpha, d)
+    beta_arr = np.full_like(V_POINTS, beta)
+    got = g_alpha_d(V_POINTS, beta_arr, alpha, d)
+    single = np.array([g_alpha_d(V_POINTS[i:i + 1], beta_arr[i:i + 1], alpha, d)[0]
+                       for i in range(V_POINTS.size)])
     want = np.array([_reference(v, beta, alpha, d) for v in V_POINTS])
 
     peak = np.max(np.abs(want))
     # Compare on the scale of the kernel's own peak: g crosses zero, so a
-    # pointwise relative tolerance is meaningless near the crossings.
-    assert np.max(np.abs(got - want)) < 1e-5 * peak
+    # pointwise relative tolerance is meaningless near the crossings. Where g
+    # itself is ~0 (alpha near 1, |beta| = 1, odd d), compare against the size
+    # of the integral, l1 = int |integrand| = Gamma(d/alpha) / alpha / (2 pi)^d.
+    l1 = gamma(d / alpha) / alpha / TWO_PI ** d
+    tol = 1e-5 * peak + 1e-10 * l1
+    assert np.max(np.abs(got - want)) < tol
+    assert np.max(np.abs(single - want)) < tol
 
 
 @pytest.mark.parametrize("d", [1, 2, 3, 4])

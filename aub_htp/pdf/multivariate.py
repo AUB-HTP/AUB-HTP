@@ -226,40 +226,60 @@ def _h_real_imag_general(x, beta, alpha, n, quad_limit):
     return HR, HI
 
 
-def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
-                      max_panels=400_000):
+_U_MAX = 1.0e5          # upper limit of the direct integral
+_MAX_PANELS = 400_000   # panel limit of the direct integral
+
+
+def _direct_is_reliable(alpha):
+    """True when the direct integral reaches 39**(1/alpha), where
+    exp(-u^alpha) < 1e-17. Below alpha around 0.32 that point is beyond
+    _U_MAX and the integral is truncated.
+    """
+    return 39.0 ** (1.0 / alpha) <= _U_MAX
+
+
+def _g_general_direct_band(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
+                           max_panels=_MAX_PANELS):
     """``g_{alpha,d}`` (``alpha != 1``) straight from definition (1).
 
     Composite Gauss-Legendre on ``[0, u_max]`` with the panel count matched to
     the ``cos(v u - ...)`` oscillation.  ``exp(-u^alpha)`` decays slowly for
     small ``alpha``, so ``u_max`` -- and hence the cost -- grows like
-    ``39^(1/alpha)``.  Used only where the finite-interval kernel breaks down
-    (``alpha < 1`` at ``|beta| = 1``), so the extra cost is confined.
+    ``39^(1/alpha)``.  Used where the finite-interval kernel is unreliable:
+    alpha < 1 at |beta| = 1, and |v| <= _direct_cutoff(alpha).
+    Called through _g_general_direct, which splits v into bands.
     """
     v = np.atleast_1d(np.asarray(v, dtype=np.float64))
     beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
     tau = np.tan(np.pi * alpha / 2.0)
 
     # exp(-u^alpha) < ~1e-17 past this point.
-    u_max = float(min(39.0 ** (1.0 / alpha), 1.0e5))
+    u_max = float(min(39.0 ** (1.0 / alpha), _U_MAX))
     v_max = max(float(np.max(np.abs(v))), 1e-3)
-    n_panels = int(np.ceil(per_period * v_max * u_max / (2.0 * np.pi)))
-    n_panels = max(n_panels, 64)
+    beta_max = float(np.max(np.abs(beta)))
+    # waves of v u plus waves of beta tau u^alpha over [0, u_max]
+    phase = v_max * u_max + beta_max * abs(tau) * u_max ** alpha
+    n_panels = int(np.ceil(per_period * phase / (2.0 * np.pi)))
+    n_panels = max(n_panels, 4096, int(np.ceil(2 * u_max)))
     if n_panels > max_panels:
         import warnings
         warnings.warn(
-            f"multivariate stable kernel: alpha={alpha:g} with |beta|=1 needs "
+            f"multivariate stable kernel: alpha={alpha:g} needs "
             f"{n_panels} quadrature panels for |v| up to {v_max:g}; capping at "
-            f"{max_panels}. Results in this corner may lose accuracy.",
+            f"{max_panels}. Results may lose accuracy.",
             RuntimeWarning, stacklevel=2,
         )
         n_panels = max_panels
 
     xg, wg = np.polynomial.legendre.leggauss(gl_nodes)
-    edges = np.linspace(0.0, u_max, n_panels + 1)
-    half = 0.5 * (edges[1] - edges[0])
+    # u**alpha has an infinite slope at u = 0: split the first panel
+    # geometrically toward 0 (ratio 10, smallest piece 1e-8 of a panel).
+    h = u_max / n_panels
+    edges = np.concatenate([[0.0], h * 0.1 ** np.arange(8, 0, -1),
+                            np.linspace(h, u_max, n_panels)])
     total = np.zeros_like(v)
     for lo, hi in zip(edges[:-1], edges[1:]):
+        half = 0.5 * (hi - lo)
         u = 0.5 * (lo + hi) + half * xg
         ua = u ** alpha
         amp = wg * u ** (d - 1) * np.exp(-ua)
@@ -268,8 +288,39 @@ def _g_general_direct(v, beta, alpha, d, *, gl_nodes=20, per_period=2.0,
     return total / (2.0 * np.pi) ** d
 
 
+def _direct_cutoff(alpha):
+    """|v| below which g is computed from definition (1) instead of the h-function.
+
+    For alpha < 1 the h-function integrand concentrates in a narrow region,
+    and quad_vec can miss it. At small |v| the largest failing |v| grows by one
+    decade per 0.1 in alpha (about 10**(10 alpha - 9.2)); near alpha = 1 the
+    h-function's exponents grow like 1/(1 - alpha) and it also fails at
+    isolated large |v|. The cutoff is 10**(10 alpha - 8) / (1 - alpha)**2,
+    capped at the largest |v| the direct integral resolves within _MAX_PANELS
+    panels (pi * _MAX_PANELS / u_max). Where the direct integral would be
+    truncated (alpha below about 0.32) the h-function is kept.
+    """
+    if alpha >= 1.0 or not _direct_is_reliable(alpha):
+        return 0.0
+    resolvable = np.pi * _MAX_PANELS / 39.0 ** (1.0 / alpha)
+    return min(10.0 ** (10.0 * alpha - 8.0) / (1.0 - alpha) ** 2, resolvable)
+
+
 def _g_general(v, beta, alpha, d, quad_limit):
-    """``g_{alpha,d}`` for ``alpha != 1`` via the h-function representation."""
+    """``g_{alpha,d}`` for ``alpha != 1`` via the h-function representation.
+
+    Values with |v| <= _direct_cutoff(alpha) are computed from definition (1).
+    """
+    v = np.asarray(v, dtype=np.float64)
+    beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
+    near = np.abs(v) <= _direct_cutoff(alpha)
+    if np.any(near):
+        g = np.empty(v.shape, dtype=np.float64)
+        g[near] = _g_general_direct(v[near], beta[near], alpha, d)
+        if not np.all(near):
+            g[~near] = _g_general(v[~near], beta[~near], alpha, d, quad_limit)
+        return g
+
     n = d - 1
     tan_h = np.tan(np.pi * alpha / 2.0)
     c0 = 1.0 / np.sqrt(1.0 + (beta * tan_h) ** 2)          # cos(alpha*theta0)
@@ -293,14 +344,22 @@ def _g_general(v, beta, alpha, d, quad_limit):
     # and overflow.  For small |x| the whole integrand collapses to zero.  Fall
     # back to the defining integral there (exact, just more expensive).
     #
-    # Only even ``d`` needs it: cos(pi (d-1)/2) and sin(pi (d-1)/2) select Re h
-    # for odd ``d`` and Im h for even ``d``, and the breakdown is confined to
-    # Im h -- for odd ``d`` the h-function stays accurate to ~1e-9 there.
-    if alpha < 1.0 and d % 2 == 0:
+    # Even ``d`` (Im h) fails everywhere there. Odd ``d`` (Re h) also fails at
+    # small |v| (alpha = 0.35, beta = -1, d = 3, v = 1e-4: error 3.5e-5 of the
+    # peak), so it is replaced too wherever the direct integral is not
+    # truncated (``_direct_is_reliable``).
+    if alpha < 1.0 and (d % 2 == 0 or _direct_is_reliable(alpha)):
         degenerate = np.abs(beta_star) > 1.0 - 1e-6
         if np.any(degenerate):
             g[degenerate] = _g_general_direct(v[degenerate], beta[degenerate],
                                               alpha, d)
+
+    # quad_vec can also miss the integrand at isolated large |v| near alpha = 1
+    # and return exactly 0; recompute those from definition (1).
+    if alpha < 1.0 and _direct_is_reliable(alpha):
+        missed = (g == 0.0) & (x_abs > 1e-9) & (np.abs(beta_star) <= 1.0 - 1e-6)
+        if np.any(missed):
+            g[missed] = _g_general_direct(v[missed], beta[missed], alpha, d)
 
     # x = 0 is a removable singularity of the finite-interval kernel (r has x in
     # its denominator); evaluate definition (1) directly there.
@@ -308,6 +367,28 @@ def _g_general(v, beta, alpha, d, quad_limit):
     if np.any(zero):
         g[zero] = _g_at_zero(beta[zero], alpha, d, quad_limit)
     return g
+
+
+_DIRECT_N_BANDS = 4
+
+
+def _g_general_direct(v, beta, alpha, d, **kwargs):
+    """Definition (1), evaluated in groups of equal size by |v| (quartiles).
+
+    The panel count grows with the largest |v| in a call, so small |v| are
+    computed separately and do not pay for the large ones.
+
+    ``v`` and ``beta`` must be 1-D.
+    """
+    v = np.atleast_1d(np.asarray(v, dtype=np.float64))
+    beta = np.broadcast_to(np.asarray(beta, dtype=np.float64), v.shape)
+    out = np.empty(v.shape, dtype=np.float64)
+    if v.size == 0:
+        return out
+    order = np.argsort(np.abs(v), kind="stable")
+    for idx in np.array_split(order, min(_DIRECT_N_BANDS, v.size)):
+        out[idx] = _g_general_direct_band(v[idx], beta[idx], alpha, d, **kwargs)
+    return out
 
 
 def _g_at_zero(beta, alpha, d, quad_limit):
