@@ -271,7 +271,8 @@ def pad_grid(X, left_pts=5, right_pts=5, growth=1.08):
       • core_slice: slice to map back to original region
     """
     X = np.asarray(X, dtype=np.float64)
-    assert X.ndim == 1 and X.size >= 3, "X must be 1D with >=3 points"
+    if X.ndim != 1 or X.size < 3:
+        raise ValueError("X must be 1D with >=3 points")
     if not np.all(np.diff(X) > 0):
         raise ValueError("X must be strictly increasing")
 

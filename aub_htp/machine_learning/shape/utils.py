@@ -3,7 +3,8 @@ import numpy as np
 from aub_htp.statistics import alpha_power
 
 def compute_feature_wise_power(data: np.ndarray, alpha: float) -> np.ndarray:
-    assert data.ndim == 2
+    if data.ndim != 2:
+        raise ValueError(f"data must be a 2D array, got {data.ndim}D")
     _, n_features = data.shape
     power = np.empty(n_features, dtype=float)
     for feature in range(n_features):

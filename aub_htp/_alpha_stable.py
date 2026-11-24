@@ -231,7 +231,7 @@ class alpha_stable_gen(rv_continuous):
             else:
                 return delta + (2 / np.pi) * beta * gamma * np.log(gamma)
         else:
-            raise AssertionError("Unknown parametrization type")
+            raise ValueError("Unknown parametrization type")
 
 
 class multivariate_alpha_stable_gen(multi_rv_generic):
@@ -281,7 +281,6 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             If the spectral measure sampler is not supported.
         """
         spectral_measure_sampler = self._check_spectral_measure_sampler(alpha, spectral_measure_sampler)
-        assert isinstance(spectral_measure_sampler, BaseSpectralMeasureSampler)
         samples: np.ndarray
         if isinstance(spectral_measure_sampler, (EllipticSampler, IsotropicSampler)):
             if isinstance(spectral_measure_sampler, IsotropicSampler):
@@ -356,7 +355,6 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         raise ValueError("Unknown spectral measure sampler")
 
 def _sanitize_array_args(*args):
-    assert len(args) > 0
     args = list(map(np.asarray, args))
     args = np.broadcast_arrays(*args)
     size = args[0].shape

@@ -12,7 +12,9 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
     Note for maintainers: This function uses the excplicit formulas for the Cauchy and Normal distributions for alpha = 1 and 2.
     This is for better performance.
     """
-    assert data.ndim == 2
+    data = np.asarray(data)
+    if data.ndim != 2:
+        raise ValueError(f"data must be a 2D array, got {data.ndim}D")
     _, dimensions = data.shape
     if dimensions == 1:
         if np.isclose(alpha, 2):
