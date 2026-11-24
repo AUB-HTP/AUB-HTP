@@ -29,7 +29,8 @@ def make_frequency_grid(n, dt, d):
     freq : np.ndarray
         One-dimensional grid of frequencies.
     """
-    assert n % 2 == 1
+    if n <= 0 or n % 2 != 1:
+        raise ValueError(f"n must be a positive odd integer, got {n}")
 
     freq = np.arange(-(n // 2), n // 2 + 1) * dt
     mesh = np.meshgrid(*([freq] * d), indexing="ij")

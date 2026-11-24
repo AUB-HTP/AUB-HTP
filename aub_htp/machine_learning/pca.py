@@ -6,7 +6,8 @@ from sklearn.utils.validation import validate_data
 
 def get_principal_components(X: np.ndarray, alpha: float, shape_estimation_method: MethodLiteral = "ratio-1") -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     X = np.asarray(X, dtype=float)
-    assert X.ndim == 2
+    if X.ndim != 2:
+        raise ValueError(f"X must be a 2D array, got {X.ndim}D")
     shape_estimator = AlphaStableShape(alpha=alpha, method=shape_estimation_method).fit(X)
     shape = shape_estimator.shape_
     eigenvalues, eigenvectors = np.linalg.eigh(shape)
