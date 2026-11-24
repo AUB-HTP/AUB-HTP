@@ -198,9 +198,12 @@ class MixedSampler(BaseSpectralMeasureSampler):
         spectral_measures: list[BaseSpectralMeasureSampler],
         weights: np.ndarray,
     ):
-        assert len(weights) == len(spectral_measures)
-        assert len(spectral_measures) > 0
-        assert all(sprectral_measure.dimensions() == spectral_measures[0].dimensions() for sprectral_measure in spectral_measures)
+        if len(spectral_measures) == 0:
+            raise ValueError("spectral_measures must be non-empty")
+        if len(weights) != len(spectral_measures):
+            raise ValueError("weights must have one weight per spectral measure")
+        if any(m.dimensions() != spectral_measures[0].dimensions() for m in spectral_measures):
+            raise ValueError("all spectral measures must have the same number of dimensions")
 
         self.number_of_dimensions = spectral_measures[0].dimensions()
         self.spectral_measures = spectral_measures
@@ -225,7 +228,7 @@ class MixedSampler(BaseSpectralMeasureSampler):
         return float(self._mass)
 
     def _calculate_mass(self):
-        return np.sum(
+        return sum(
             spectral_measure.mass() * weight
                 for spectral_measure, weight in zip(self.spectral_measures, self.weights)
         )
@@ -241,8 +244,8 @@ class UnivariateSampler(BaseSpectralMeasureSampler):
         self.beta = beta
         self.gamma = gamma
 
-        if self.alpha >= 1:
-            assert self.beta == 0, "For alpha >= 1, beta is 0"
+        if self.alpha >= 1 and self.beta != 0:
+            raise ValueError("when alpha >= 1, beta must be 0")
 
     def sample(self, number_of_samples: int, random_state: None | int | np.random.RandomState | np.random.Generator = None) -> np.ndarray:
         random_state = get_random_state_generator(random_state)
