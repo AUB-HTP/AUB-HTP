@@ -495,10 +495,34 @@ class TestMultivariateIsotropicPdfAndEntropy:
         assert entropy > isotropic_entropy(dimensions, 2)
         assert np.all(pdf > 0)
 
-    def test_extreme_alpha_raises_value_error(self):
-        """The pdf does not integrate to 1 here, so it is refused."""
+    def test_too_small_alpha_raises_value_error(self):
+        """gamma = (1 / alpha)^(1 / alpha) is too large to square."""
         with pytest.raises(ValueError, match="cannot be computed accurately"):
-            isotropic_entropy(2, 0.02)
+            isotropic_entropy(2, 0.01)
+        with pytest.raises(ValueError, match="cannot be computed accurately"):
+            isotropic_pdf(np.ones((3, 2)), 0.01)
+
+    @pytest.mark.parametrize(
+        ("alpha", "dimensions"), [(0.05, 2), (0.1, 2), (0.1, 5), (0.2, 3), (0.5, 2), (1.5, 3)]
+    )
+    def test_isotropic_entropy_matches_direct_integration(self, alpha, dimensions):
+        """
+        h = -int |S^(d-1)| r^(d-1) f_d ln f_d dr from the exact log pdf, far beyond the table.
+
+        For a small alpha much of the mass is beyond the table, where the entropy uses the power law.
+        """
+        from scipy.integrate import simpson
+        from scipy.special import gammaln
+        from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf
+        gamma_scale = (1 / alpha) ** (1 / alpha)
+        # Not beyond ln r = 700, where r overflows.
+        s = np.linspace(-45, min(np.log(2 * gamma_scale) + 60 / alpha, 700.0), 8001)
+        log_pdf = _isotropic_radial_log_pdf(np.exp(s), alpha, dimensions, gamma_scale)
+        log_sphere_area = np.log(2) + dimensions / 2 * np.log(np.pi) - gammaln(dimensions / 2)
+        mass_density = np.exp(log_sphere_area + dimensions * s + log_pdf)
+
+        assert np.isclose(simpson(mass_density, x=s), 1, atol=1e-6)
+        assert np.isclose(isotropic_entropy(dimensions, alpha), -simpson(mass_density * log_pdf, x=s), rtol=1e-4)
 
 
 def isotropic_samples(n, dimensions, alpha, seed=0):

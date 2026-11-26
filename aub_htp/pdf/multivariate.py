@@ -832,8 +832,11 @@ def _isotropic_series_radius(alpha, d, gamma_scale):
 
     ``inf`` if it is accurate nowhere.
     """
-    candidates = (2.0 * gamma_scale
-                  / np.geomspace(1e3, 1e-8, 600) ** (1.0 / alpha))
+    with np.errstate(over="ignore"):
+        candidates = (2.0 * gamma_scale
+                      / np.geomspace(1e3, 1e-8, 600) ** (1.0 / alpha))
+    # A small alpha overflows the largest ones.
+    candidates = candidates[np.isfinite(candidates)]
     _, relative_error = _isotropic_radial_log_series(
         candidates, alpha, d, gamma_scale)
     inaccurate = np.flatnonzero(~(relative_error <= 1e-10))

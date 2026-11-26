@@ -67,7 +67,8 @@ class _RadialLogPdf:
         # exp(-(gamma |t|)^alpha) = exp(-|t|^alpha / alpha)
         gamma_scale = (1 / alpha) ** (1 / alpha)
 
-        radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale)
+        # gamma^2 overflows for alpha below about 0.012.
+        radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale) if gamma_scale < 1e150 else np.inf
         if not np.isfinite(radius_join):
             raise ValueError(
                 f"The isotropic pdf cannot be computed accurately for alpha = {alpha} in {dimensions} dimensions."
@@ -77,8 +78,9 @@ class _RadialLogPdf:
             0.5 * (math.lgamma(dimensions / alpha) - math.lgamma((dimensions + 2) / alpha))
         )
         self.log_radius_low = np.log(1e-3 * min(core, radius_join))
-        # The mass beyond r decays like r^-alpha: stop at exp(-50) of it, and at ln r = 100.
-        self.log_radius_high = max(min(np.log(radius_join) + 50 / alpha, 100.0), np.log(radius_join) + 1)
+        # The mass beyond r decays like r^-alpha: stop at exp(-50) of it, and at ln(r / 2 gamma) = 100.
+        log_radius_limit = np.log(2 * gamma_scale) + 100.0
+        self.log_radius_high = max(min(np.log(radius_join) + 50 / alpha, log_radius_limit), np.log(radius_join) + 1)
 
         # About 60 points per decade.
         n_points = int(26 * (self.log_radius_high - self.log_radius_low)) + 2
@@ -105,9 +107,14 @@ class _RadialLogPdf:
         mass_density = np.exp(log_area + d * self.log_radius + self.log_pdf)
         # Mass of the ball of radius r_low, where the pdf is f_d(0).
         inner_mass = mass_density[0] / d
+        # Beyond r_high, ln f_d = ln f_d(r_high) - (d + alpha) (s - s_high), and the mass
+        # density is its value at r_high times exp(-alpha (s - s_high)).
+        alpha = self.alpha
+        outer = mass_density[-1] * (self.log_pdf[-1] / alpha - (d + alpha) / alpha ** 2)
         return float(
             -inner_mass * self.log_pdf[0]
             - simpson(mass_density * self.log_pdf, x=self.log_radius)
+            - outer
         )
 
 

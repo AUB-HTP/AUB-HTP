@@ -396,3 +396,57 @@ class Alpha_location_properties:
         model.fit(X)
 
         assert len(np.unique(model.labels_)) == 2
+
+
+class TestAlphaStableKMeansAcrossAlphas:
+    """Every alpha, in one and in many dimensions. Multi-D used to raise for alpha other than 1 and 2."""
+
+    ALPHAS = [0.5, 1.0, 1.5, 2.0]
+
+    @staticmethod
+    def two_clusters(n_features, seed=0):
+        rng = np.random.default_rng(seed)
+        centers = np.array([np.zeros(n_features), np.full(n_features, 8.0)])
+        X = np.vstack([rng.normal(center, 1.0, size=(60, n_features)) for center in centers])
+        return X, centers, np.repeat([0, 1], 60)
+
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    @pytest.mark.parametrize("n_features", [1, 2, 3])
+    def test_fit_recovers_two_clusters(self, alpha, n_features):
+        X, centers, labels = self.two_clusters(n_features)
+
+        model = AlphaStableKMeans(n_clusters=2, alpha=alpha, max_iter=20).fit(X)
+
+        order = np.argsort(model.cluster_centers_[:, 0])
+        assert model.cluster_centers_.shape == (2, n_features)
+        # A small alpha follows the densest part of 60 samples, not their mean.
+        assert np.allclose(model.cluster_centers_[order], centers, atol=1.0)
+        assert np.array_equal(order[model.labels_], labels)
+
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    def test_predict_and_score_multivariate(self, alpha):
+        X, _, _ = self.two_clusters(2, seed=1)
+
+        model = AlphaStableKMeans(n_clusters=2, alpha=alpha, max_iter=20).fit(X)
+
+        assert np.array_equal(model.predict(X), model.labels_)
+        assert np.isfinite(model.inertia_) and model.inertia_ > 0
+        assert np.isclose(
+            model.score(X), -compute_inertia(X, model.cluster_centers_, model.labels_, alpha)
+        )
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_centers_resist_outliers_multivariate(self, alpha):
+        """A heavy-tailed alpha is not pulled by a few far points, unlike alpha = 2."""
+        X, centers, _ = self.two_clusters(2, seed=2)
+        X_with_outliers = np.vstack([X, [[8.0, 500.0], [8.0, 600.0]]])
+
+        robust = AlphaStableKMeans(n_clusters=2, alpha=alpha, max_iter=20).fit(X_with_outliers)
+        gaussian = AlphaStableKMeans(n_clusters=2, alpha=2.0, max_iter=20).fit(X_with_outliers)
+
+        def upper_center_error(model):
+            upper = model.cluster_centers_[np.argmax(model.cluster_centers_[:, 0])]
+            return np.linalg.norm(upper - centers[1])
+
+        assert upper_center_error(robust) < 1.0
+        assert upper_center_error(robust) < upper_center_error(gaussian)

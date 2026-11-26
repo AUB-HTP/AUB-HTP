@@ -425,3 +425,62 @@ class TestAlphaStableLinearRegressorInternalValidation:
         assert y_valid.shape == (3, 1)
         assert alpha == 1.0
         assert y_is_one_dimensional is False
+
+
+class TestAlphaStableLinearRegressorAcrossAlphas:
+    """Every alpha, with one and with many targets. Many targets used to raise for alpha other than 1 and 2."""
+
+    ALPHAS = [0.5, 1.0, 1.5, 2.0]
+    COEF = np.array([[2.0, -1.0], [0.5, 3.0]])
+    INTERCEPT = np.array([1.0, -2.0])
+
+    def data(self, n_targets, seed=0):
+        rng = np.random.default_rng(seed)
+        X = rng.normal(size=(80, 2))
+        y = X @ self.COEF[:n_targets].T + self.INTERCEPT[:n_targets] + 0.05 * rng.normal(size=(80, n_targets))
+        return X, y
+
+    def fit(self, X, y, alpha):
+        np.random.seed(0)
+        return AlphaStableLinearRegressor(alpha=alpha, max_iter=300, tol=1e-4).fit(X, y)
+
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    def test_fit_recovers_coefficients_with_one_target(self, alpha):
+        X, y = self.data(1)
+
+        model = self.fit(X, y.ravel(), alpha)
+
+        assert np.allclose(model.coef_, self.COEF[:1], atol=0.1)
+        assert np.allclose(model.intercept_, self.INTERCEPT[:1], atol=0.1)
+        assert model.predict(X).shape == (80,)
+        assert model.score(X, y.ravel()) > 0.95
+
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    def test_fit_recovers_coefficients_with_two_targets(self, alpha):
+        X, y = self.data(2)
+
+        model = self.fit(X, y, alpha)
+
+        assert np.allclose(model.coef_, self.COEF, atol=0.1)
+        assert np.allclose(model.intercept_, self.INTERCEPT, atol=0.1)
+        assert model.predict(X).shape == (80, 2)
+        assert model.score(X, y) > 0.95
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_heavy_tailed_alpha_resists_outliers_with_two_targets(self, alpha):
+        X, y = self.data(2, seed=1)
+        y[:3] += 200.0
+
+        robust = self.fit(X, y, alpha)
+        gaussian = self.fit(X, y, 2.0)
+
+        robust_error = np.max(np.abs(robust.coef_ - self.COEF))
+        assert robust_error < 0.2
+        assert robust_error < np.max(np.abs(gaussian.coef_ - self.COEF))
+
+    @pytest.mark.parametrize("alpha", ALPHAS)
+    def test_loss_and_score_with_two_targets(self, alpha):
+        _, y = self.data(2, seed=2)
+
+        assert l_alpha_loss(y, y + 0.1, alpha=alpha) > l_alpha_loss(y, y + 0.01, alpha=alpha) > 0
+        assert r_alpha_score(y, y + 0.01, alpha=alpha) > r_alpha_score(y, y + 1.0, alpha=alpha)
