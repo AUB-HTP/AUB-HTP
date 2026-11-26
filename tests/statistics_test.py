@@ -389,6 +389,118 @@ class TestIsotropicPdfShape:
             isotropic_pdf(data, 1.0)
 
 
+class TestMultivariateIsotropicPdfAndEntropy:
+    """isotropic_pdf and isotropic_entropy in d >= 2 dimensions for alpha != 1, 2."""
+
+    @staticmethod
+    def points_at_radius(radius, dimensions):
+        data = np.zeros((len(radius), dimensions))
+        data[:, 0] = radius
+        return data
+
+    @pytest.mark.parametrize("alpha", [0.3, 0.5, 0.8, 1.2, 1.5, 1.9])
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_pdf_integrates_to_one(self, alpha, dimensions):
+        """int |S^(d-1)| r^(d-1) f_d(r) dr = 1, integrated over s = ln r."""
+        from scipy.integrate import simpson
+        from scipy.special import gamma
+        # The mass beyond r decays like r^(-alpha).
+        s = np.linspace(-25, 35 / alpha, 40001)
+        pdf = isotropic_pdf(self.points_at_radius(np.exp(s), dimensions), alpha)
+        sphere_area = 2 * np.pi ** (dimensions / 2) / gamma(dimensions / 2)
+
+        assert pdf.shape == s.shape
+        assert np.isclose(simpson(sphere_area * np.exp(dimensions * s) * pdf, x=s), 1, atol=1e-4)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    @pytest.mark.parametrize("dimensions", [2, 3])
+    def test_isotropic_pdf_matches_radial_quadrature(self, alpha, dimensions):
+        from aub_htp.pdf.multivariate import _isotropic_radial_pdf
+        radius = np.concatenate(([0.0], np.geomspace(1e-5, 20, 41)))
+        expected = _isotropic_radial_pdf(radius, alpha, dimensions, (1 / alpha) ** (1 / alpha))
+
+        pdf = isotropic_pdf(self.points_at_radius(radius, dimensions), alpha)
+
+        assert np.allclose(pdf, expected, rtol=1e-4, atol=0)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_isotropic_pdf_depends_only_on_the_norm(self, alpha):
+        rng = np.random.default_rng(0)
+        directions = rng.normal(size=(20, 3))
+        directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+
+        pdf = isotropic_pdf(2.5 * directions, alpha)
+
+        assert np.allclose(pdf, pdf[0], rtol=1e-12)
+
+    @pytest.mark.parametrize("alpha", [0.3, 0.5, 0.8, 1.2, 1.5, 1.9])
+    @pytest.mark.parametrize("dimensions", [2, 5])
+    def test_isotropic_pdf_decreases_with_the_norm(self, alpha, dimensions):
+        """alpha_power relies on this."""
+        radius = np.concatenate(([0.0], np.geomspace(1e-8, 1e8, 2001)))
+
+        pdf = isotropic_pdf(self.points_at_radius(radius, dimensions), alpha)
+
+        assert np.all(pdf > 0)
+        assert np.all(np.diff(pdf) <= 0)
+
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_pdf_is_continuous_in_alpha_at_one_and_two(self, dimensions):
+        data = self.points_at_radius(np.geomspace(1e-3, 50, 30), dimensions)
+
+        assert np.allclose(isotropic_pdf(data, 1 - 1e-4), isotropic_pdf(data, 1), rtol=5e-3)
+        assert np.allclose(isotropic_pdf(data, 1 + 1e-4), isotropic_pdf(data, 1), rtol=5e-3)
+        # The tail of alpha < 2 is a power law, so compare with the normal pdf only in its bulk.
+        bulk = self.points_at_radius(np.geomspace(1e-3, 3, 30), dimensions)
+        assert np.allclose(isotropic_pdf(bulk, 2 - 1e-4), isotropic_pdf(bulk, 2), rtol=5e-3)
+
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_entropy_is_continuous_in_alpha_at_one_and_two(self, dimensions):
+        assert np.isclose(isotropic_entropy(dimensions, 1 - 1e-4), isotropic_entropy(dimensions, 1), atol=5e-3)
+        assert np.isclose(isotropic_entropy(dimensions, 1 + 1e-4), isotropic_entropy(dimensions, 1), atol=5e-3)
+        assert np.isclose(isotropic_entropy(dimensions, 2 - 1e-4), isotropic_entropy(dimensions, 2), atol=5e-3)
+
+    @pytest.mark.parametrize("dimensions", [2, 3])
+    def test_isotropic_entropy_decreases_with_alpha(self, dimensions):
+        alphas = [0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0]
+        entropies = [isotropic_entropy(dimensions, alpha) for alpha in alphas]
+
+        assert np.all(np.diff(entropies) < 0)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_isotropic_entropy_matches_monte_carlo(self, alpha):
+        """h = E[-ln p(X)], with X = sqrt(A) G for A positive (alpha / 2)-stable and G normal."""
+        from scipy.stats import levy_stable
+        n, dimensions = 200_000, 2
+        rng = np.random.default_rng(0)
+        # X has characteristic function exp(-|t|^alpha / alpha).
+        mixing = levy_stable.rvs(
+            alpha / 2, 1, loc=0, scale=np.cos(np.pi * alpha / 4) ** (2 / alpha), size=n, random_state=rng,
+        )
+        normal = rng.normal(scale=np.sqrt(2) * (1 / alpha) ** (1 / alpha), size=(n, dimensions))
+        samples = np.sqrt(mixing)[:, None] * normal
+
+        negative_log_pdf = -np.log(isotropic_pdf(samples, alpha))
+        standard_error = np.std(negative_log_pdf) / np.sqrt(n)
+
+        assert abs(np.mean(negative_log_pdf) - isotropic_entropy(dimensions, alpha)) < 5 * standard_error
+
+    @pytest.mark.parametrize(("alpha", "dimensions"), [(1.5, 100), (0.5, 100), (0.2, 20), (1.9, 300)])
+    def test_many_dimensions_and_small_alpha_work(self, alpha, dimensions):
+        entropy = isotropic_entropy(dimensions, alpha)
+        pdf = isotropic_pdf(np.ones((3, dimensions)), alpha)
+
+        assert np.isfinite(entropy)
+        # The entropy decreases with alpha, down to the normal one.
+        assert entropy > isotropic_entropy(dimensions, 2)
+        assert np.all(pdf > 0)
+
+    def test_extreme_alpha_raises_value_error(self):
+        """The pdf does not integrate to 1 here, so it is refused."""
+        with pytest.raises(ValueError, match="cannot be computed accurately"):
+            isotropic_entropy(2, 0.02)
+
+
 def test_statistics_all_lists_the_public_functions():
     import aub_htp.statistics
     assert set(aub_htp.statistics.__all__) == {

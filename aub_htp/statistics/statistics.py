@@ -1,7 +1,11 @@
+import math
 from functools import lru_cache
 from scipy.optimize import minimize, brentq
 import aub_htp as ht
+from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf, _isotropic_series_radius
 from scipy import special
+from scipy.integrate import simpson
+from scipy.interpolate import PchipInterpolator
 from scipy.stats import levy_stable
 import numpy as np
 
@@ -40,6 +44,96 @@ def _validate_data(data: np.ndarray) -> tuple[np.ndarray, bool]:
     return data, data_is_one_dimensional
 
 
+def _log_unit_sphere_area(dimensions: int) -> float:
+    """
+    ln |S^(d-1)|, the log of the area of the unit sphere in d dimensions.
+
+    |S^0| = 2, |S^1| = 2 pi, and |S^(d-1)| = 2 pi / (d - 2) * |S^(d-3)|, so
+
+        |S^(d-1)| = 2^(n + 1) pi^floor(d / 2) / ((d - 2) (d - 4) ...)
+
+    where n is the number of factors of the denominator, which stops at 1 or 2.
+    """
+    denominator_factors = np.arange(dimensions - 2, 0, -2)
+    return float(
+        (denominator_factors.size + 1) * np.log(2)
+        + (dimensions // 2) * np.log(np.pi)
+        - np.sum(np.log(denominator_factors))
+    )
+
+
+class _RadialLogPdf:
+    """
+    ln f_d(r) of the isotropic alpha-stable pdf in d >= 2 dimensions, for alpha != 1, 2.
+
+    _isotropic_radial_log_pdf is too slow to call on the data at every step of a search, so
+    it is tabulated once on [r_low, r_join] and interpolated. Beyond r_join it uses its
+    series in 1 / r, which is fast, so it is called directly. Below r_low the pdf is f_d(0).
+    """
+
+    def __init__(self, dimensions: int, alpha: float):
+        self.dimensions = dimensions
+        self.alpha = alpha
+        # exp(-(gamma |t|)^alpha) = exp(-|t|^alpha / alpha)
+        self.gamma_scale = gamma_scale = (1 / alpha) ** (1 / alpha)
+
+        self.radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale)
+        if not np.isfinite(self.radius_join):
+            raise ValueError(
+                f"The isotropic pdf cannot be computed accurately for alpha = {alpha} in {dimensions} dimensions."
+            )
+        # f_d(r) = f_d(0) (1 - (r / core)^2 + ...) near 0, so f_d(r_low) = f_d(0) to 1e-6.
+        core = np.sqrt(2 * dimensions) * gamma_scale * np.exp(
+            0.5 * (math.lgamma(dimensions / alpha) - math.lgamma((dimensions + 2) / alpha))
+        )
+        self.radius_low = 1e-3 * min(core, self.radius_join)
+
+        n_points = int(60 * np.log10(self.radius_join / self.radius_low)) + 2
+        radius = np.geomspace(self.radius_low, self.radius_join, n_points)
+        # The pdf decreases with r. Rounding must not break this, since alpha_power relies on it.
+        self.log_pdf = np.minimum.accumulate(self._log_pdf(radius))
+        self.interpolator = PchipInterpolator(np.log(radius), self.log_pdf)
+        self.entropy = self._entropy()
+
+    def _log_pdf(self, radius: np.ndarray) -> np.ndarray:
+        return _isotropic_radial_log_pdf(radius, self.alpha, self.dimensions, self.gamma_scale)
+
+    def __call__(self, radius: np.ndarray) -> np.ndarray:
+        radius = np.asarray(radius, dtype=float)
+        tail = radius > self.radius_join
+        out = np.empty(radius.shape, dtype=float)
+        out[~tail] = self.interpolator(np.log(np.maximum(radius[~tail], self.radius_low)))
+        if np.any(tail):
+            out[tail] = np.minimum(self._log_pdf(radius[tail]), self.log_pdf[-1])
+        return out
+
+    def _entropy(self) -> float:
+        """
+        h = -int_0^inf |S^(d-1)| r^(d-1) f_d(r) ln f_d(r) dr
+
+        integrated over s = ln r, where r^(d-1) dr = r^d ds.
+        """
+        d = self.dimensions
+        log_area = _log_unit_sphere_area(d)
+        log_low, log_join = np.log(self.radius_low), np.log(self.radius_join)
+        # The integrand decays like s exp(-alpha s): stop where exp(-alpha s) has lost a factor
+        # exp(-50), but not beyond ln r = 700, where r overflows.
+        log_high = max(min(log_join + 50 / self.alpha, 700.0), log_join + 1)
+        s = np.linspace(log_low, log_high, 2 * int((log_high - log_low) / 0.02) + 3)
+        log_pdf = self(np.exp(s))
+        # On [0, r_low] the pdf is f_d(0), and the ball has volume |S^(d-1)| r^d / d.
+        inner_mass = np.exp(log_area + d * log_low + self.log_pdf[0]) / d
+        return float(
+            -inner_mass * self.log_pdf[0]
+            - simpson(np.exp(log_area + d * s + log_pdf) * log_pdf, x=s)
+        )
+
+
+@lru_cache(maxsize=None)
+def _radial_log_pdf(dimensions: int, alpha: float) -> _RadialLogPdf:
+    return _RadialLogPdf(dimensions, alpha)
+
+
 def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
     """
     Isotropic PDF for alpha-stable distribution, one value per sample.
@@ -70,7 +164,7 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
         scale = (1 / alpha) ** (1 / alpha)
         return ht.alpha_stable.pdf(data.ravel(), alpha, 0, loc = 0, scale = scale)
     else:
-        raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1 (Cauchy) or alpha = 2 (Normal)")
+        return np.exp(_radial_log_pdf(dimensions, alpha)(np.linalg.norm(data, axis=1)))
 
 
 def isotropic_entropy(dimensions: int, alpha: float) -> float:
@@ -94,7 +188,7 @@ def _isotropic_entropy(dimensions: int, alpha: float) -> float:
     elif dimensions == 1:
         return float(ht.alpha_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha)))
     else:
-        raise ValueError("Multidimensional isotropic distribution is only defined for alpha = 1 (Cauchy) or alpha = 2 (Normal)")
+        return _radial_log_pdf(dimensions, alpha).entropy
 
 
 def alpha_power(data: np.ndarray, alpha: float) -> float:
