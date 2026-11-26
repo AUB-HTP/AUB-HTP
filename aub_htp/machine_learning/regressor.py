@@ -13,7 +13,12 @@ def l_alpha_loss(y, y_pred, *, alpha: float):
 
 
 def r_alpha_score(y, y_pred, *, alpha: float) -> float:
-    # TODO: Pending more analysis on this.
+    y = np.asarray(y, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if np.all(y == y[0]):
+        # A constant y has no power around its location, so the ratio would divide by 0.
+        # As in scikit-learn's r2_score: 1 if the prediction is exact, 0 otherwise.
+        return 1.0 if np.array_equal(y, y_pred) else 0.0
     y_location = np.broadcast_to(alpha_location(y, alpha), y.shape)
     return (1 - l_alpha_loss(y, y_pred, alpha=alpha)
               / l_alpha_loss(y, y_location, alpha=alpha))

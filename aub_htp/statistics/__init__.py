@@ -6,4 +6,6 @@ from .statistics import alpha_location, alpha_power, isotropic_entropy, isotropi
 __all__ = [
     "alpha_power",
     "alpha_location",
+    "isotropic_pdf",
+    "isotropic_entropy",
 ]

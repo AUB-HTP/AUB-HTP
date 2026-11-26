@@ -57,6 +57,36 @@ class TestAlphaLossAndScore:
 
         assert np.isfinite(score)
 
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_r_alpha_score_of_constant_y_is_one_for_exact_prediction(self, alpha):
+        """A constant y has zero power around its location: score as scikit-learn's r2_score does."""
+        y = np.full(5, 3.0)
+
+        assert r_alpha_score(y, y.copy(), alpha=alpha) == 1.0
+
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_r_alpha_score_of_constant_y_is_zero_for_inexact_prediction(self, alpha):
+        y = np.full(5, 3.0)
+        y_pred = np.array([3.0, 3.0, 3.0, 3.0, 4.0])
+
+        assert r_alpha_score(y, y_pred, alpha=alpha) == 0.0
+
+    def test_r_alpha_score_of_constant_multi_target_y(self):
+        y = np.tile([1.0, -2.0], (5, 1))
+
+        assert r_alpha_score(y, y.copy(), alpha=2.0) == 1.0
+        assert r_alpha_score(y, y + 1.0, alpha=2.0) == 0.0
+
+    def test_score_of_constant_y_does_not_raise(self):
+        X = np.array([[1.0], [2.0], [3.0], [4.0]])
+        y = np.full(4, 3.0)
+        model = AlphaStableLinearRegressor(alpha=2.0)
+
+        np.random.seed(0)
+        model.fit(X, y)
+
+        assert model.score(X, y) in (0.0, 1.0)
+
 class TestAlphaStableLinearRegressorValidation:
     def test_fit_raises_for_alpha_out_of_range_low(self):
         """fit should reject alpha values less than or equal to zero."""

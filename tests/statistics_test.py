@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from scipy.ndimage import shift
 from scipy.stats import alpha, cauchy
-from aub_htp.statistics import alpha_power, alpha_location
+from aub_htp.statistics import alpha_power, alpha_location, isotropic_entropy, isotropic_pdf
 from scipy.stats import multivariate_t
 
 
@@ -270,3 +270,127 @@ class TestDimensionsAndShapes:
         power = alpha_power(data, alpha)
 
         assert np.isscalar(power)
+
+
+class TestAllZeroData:
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("shape", [(10,), (10, 1)])
+    def test_alpha_power_of_all_zero_data_is_zero(self, alpha, shape):
+        """All-zero data has no root in P, so its power is 0."""
+        assert alpha_power(np.zeros(shape), alpha) == 0
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_alpha_power_of_all_zero_multivariate_data_is_zero(self, alpha):
+        assert alpha_power(np.zeros((10, 3)), alpha) == 0
+
+
+class TestAlphaCloseToOneOrTwo:
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    @pytest.mark.parametrize("offset", [-1e-9, 1e-9])
+    def test_isotropic_entropy_takes_the_closed_form_branch(self, alpha, offset):
+        """An alpha close to 1 or 2 gives the same entropy as exactly 1 or 2, in 1-D too."""
+        assert isotropic_entropy(1, alpha + offset) == isotropic_entropy(1, alpha)
+        assert isotropic_entropy(3, alpha + offset) == isotropic_entropy(3, alpha)
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    @pytest.mark.parametrize("offset", [-1e-9, 1e-9])
+    def test_isotropic_pdf_takes_the_closed_form_branch(self, alpha, offset):
+        data = np.linspace(-3, 3, 7)
+        assert np.array_equal(isotropic_pdf(data, alpha + offset), isotropic_pdf(data, alpha))
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_alpha_power_accepts_alpha_close_to_one_or_two(self, alpha):
+        data = np.random.default_rng(0).normal(0, 1, 200)
+        assert np.isclose(alpha_power(data, alpha + 1e-9), alpha_power(data, alpha))
+
+    def test_close_alphas_share_one_cache_entry(self):
+        from aub_htp.statistics.statistics import _isotropic_entropy
+        isotropic_entropy(1, 1.0)
+        misses = _isotropic_entropy.cache_info().misses
+        isotropic_entropy(1, 1.0 + 1e-9)
+        isotropic_entropy(1, 1.0 - 1e-9)
+        assert _isotropic_entropy.cache_info().misses == misses
+
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_isotropic_entropy_accepts_zero_dimensional_array_alpha(self, alpha):
+        """A 0-d array is unhashable, so it must be converted before the cache sees it."""
+        assert isotropic_entropy(1, np.array(alpha)) == isotropic_entropy(1, alpha)
+
+    def test_isotropic_entropy_matches_known_values_in_one_dimension(self):
+        assert np.isclose(isotropic_entropy(1, 2), 0.5 * np.log(2 * np.pi * np.e))
+        assert np.isclose(isotropic_entropy(1, 1), np.log(4 * np.pi))
+
+
+class TestInvalidInput:
+
+    @pytest.mark.parametrize("alpha", [0.0, -1.0, 3.0, 2.5, np.nan])
+    def test_invalid_alpha_raises_value_error(self, alpha):
+        data = np.array([1.0, 2.0, 3.0])
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_power(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_location(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_pdf(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_entropy(1, alpha)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_nan_or_infinite_data_raises_value_error(self, function, bad_value, alpha):
+        with pytest.raises(ValueError, match="NaN or infinite"):
+            function(np.array([1.0, bad_value, 3.0]), alpha)
+        with pytest.raises(ValueError, match="NaN or infinite"):
+            function(np.array([[1.0, 2.0], [bad_value, 4.0]]), alpha)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("shape", [(0,), (0, 2), (3, 0)])
+    def test_empty_data_raises_value_error(self, function, shape):
+        with pytest.raises(ValueError, match="empty"):
+            function(np.empty(shape), 1.0)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("data", [np.array(1.0), np.ones((2, 2, 2))])
+    def test_data_with_wrong_number_of_dimensions_raises_value_error(self, function, data):
+        with pytest.raises(ValueError, match=r"\(n_samples,\) or \(n_samples, n_features\)"):
+            function(data, 1.0)
+
+
+class TestIsotropicPdfShape:
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_isotropic_pdf_returns_one_value_per_sample_in_one_dimension(self, alpha):
+        data = np.linspace(-3, 3, 7).reshape(-1, 1)
+        assert isotropic_pdf(data, alpha).shape == (7,)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_isotropic_pdf_takes_one_dimensional_data_as_one_feature(self, alpha):
+        data = np.linspace(-3, 3, 7)
+        pdf = isotropic_pdf(data, alpha)
+        assert pdf.shape == (7,)
+        assert np.array_equal(pdf, isotropic_pdf(data.reshape(-1, 1), alpha))
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_isotropic_pdf_returns_one_value_per_sample_in_many_dimensions(self, alpha):
+        assert isotropic_pdf(np.ones((7, 3)), alpha).shape == (7,)
+
+    def test_isotropic_pdf_matches_scipy_in_one_dimension(self):
+        from scipy.stats import norm
+        data = np.linspace(-3, 3, 7)
+        assert np.allclose(isotropic_pdf(data, 2.0), norm.pdf(data))
+        assert np.allclose(isotropic_pdf(data, 1.0), cauchy.pdf(data))
+
+    @pytest.mark.parametrize("data", [np.array(1.0), np.ones((2, 2, 2))])
+    def test_isotropic_pdf_with_wrong_number_of_dimensions_raises_value_error(self, data):
+        with pytest.raises(ValueError, match=r"\(n_samples,\) or \(n_samples, n_features\)"):
+            isotropic_pdf(data, 1.0)
+
+
+def test_statistics_all_lists_the_public_functions():
+    import aub_htp.statistics
+    assert set(aub_htp.statistics.__all__) == {
+        "alpha_power", "alpha_location", "isotropic_pdf", "isotropic_entropy",
+    }
