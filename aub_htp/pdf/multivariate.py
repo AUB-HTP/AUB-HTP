@@ -650,6 +650,121 @@ def _sphere_directions(d, number_of_points, random_state=None, *, method="mc",
     return points, weight
 
 
+def _cusp_breakpoints(positions, weights):
+    """Angles in ``[0, 2 pi)`` where ``sigma(s)^alpha`` has a cusp in 2D.
+
+    An atom ``p`` with angle ``phi`` contributes ``w |cos(theta - phi)|^alpha``
+    to ``sigma(theta)^alpha``. That term is not smooth at ``phi +- pi/2``, the
+    two directions perpendicular to ``p``. Atoms with zero weight or at the
+    origin contribute nothing and are skipped. ``p`` and ``-p`` give the same
+    two angles, so duplicates are removed.
+    """
+    positions = np.asarray(positions, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    keep = (weights > 0.0) & (np.linalg.norm(positions, axis=1) > 0.0)
+    if not np.any(keep):
+        return np.empty(0)
+    phi = np.arctan2(positions[keep, 1], positions[keep, 0])
+    breaks = np.sort(np.mod(np.concatenate([phi + np.pi / 2, phi - np.pi / 2]),
+                            2.0 * np.pi))
+    breaks = breaks[np.concatenate([[True], np.diff(breaks) > 1e-12])]
+    if breaks.size > 1 and 2.0 * np.pi - breaks[-1] + breaks[0] < 1e-12:
+        breaks = breaks[:-1]
+    return breaks
+
+
+def _cusp_split_directions(positions, weights, number_of_points, *,
+                           levels=6, ratio=0.15, p_min=4, growth=2, p=12):
+    """Composite Gauss-Legendre rule on the circle for a discrete measure.
+
+    Returns ``(points, weights)`` with ``points`` of shape ``(m, 2)`` and
+    ``int_{S^1} f ds ~= sum_j weights[j] f(points[j])``.
+
+    The circle is cut at the cusps of ``sigma(s)^alpha`` (see
+    ``_cusp_breakpoints``), so each arc has a cusp only at its two ends. On
+    each half of an arc, panel edges shrink geometrically toward the cusp
+    (``ratio**k`` of the half-arc, ``k = 1..levels``). Every panel is then
+    split into equal pieces no wider than ``5 pi / number_of_points``
+    (2.5 degrees at 360). Pieces of the ``k``-th panel from the cusp get
+    ``min(p_min + growth * k, p)`` Gauss-Legendre points, the rest get ``p``.
+
+    The grading handles the cusps. The width cap handles the narrow kernel
+    peak at the direction perpendicular to ``x``, which can sit anywhere on an
+    arc, including next to a cusp. ``number_of_points`` therefore sets the
+    spacing, not the number of directions: with 4 atoms on 2 lines and
+    ``number_of_points = 360`` the rule has 2144 directions.
+    """
+    breaks = _cusp_breakpoints(positions, weights)
+    if breaks.size == 0:
+        raise ValueError("the spectral measure has no atom with positive weight")
+    max_panel = 5.0 * np.pi / number_of_points
+    ends = np.append(breaks, breaks[0] + 2.0 * np.pi)
+
+    # Panel edges measured from the cusp, as fractions of the half-arc.
+    fractions = np.concatenate([[0.0], ratio ** np.arange(levels, 0, -1), [1.0]])
+    rules = {}
+
+    angles, quad = [], []
+    for lo, hi in zip(ends[:-1], ends[1:]):
+        half = 0.5 * (hi - lo)
+        edges = half * fractions
+        for k, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
+            n_pts = min(p_min + growth * k, p) if k < levels else p
+            if n_pts not in rules:
+                rules[n_pts] = np.polynomial.legendre.leggauss(n_pts)
+            xg, wg = rules[n_pts]
+            pieces = max(1, int(np.ceil((b - a) / max_panel - 1e-12)))
+            cuts = np.linspace(a, b, pieces + 1)
+            for c0, c1 in zip(cuts[:-1], cuts[1:]):
+                for x0, x1 in ((lo + c0, lo + c1), (hi - c1, hi - c0)):
+                    angles.append(0.5 * (x0 + x1) + 0.5 * (x1 - x0) * xg)
+                    quad.append(0.5 * (x1 - x0) * wg)
+    angles = np.concatenate(angles)
+    quad = np.concatenate(quad)
+    order = np.argsort(np.mod(angles, 2.0 * np.pi))
+    angles, quad = angles[order], quad[order]
+    return np.column_stack([np.cos(angles), np.sin(angles)]), quad
+
+
+_CIRCLE_RULES = ("auto", "cusp", "equispaced")
+
+
+def _quadrature_directions(d, number_of_points, spectral_measure_sampler,
+                           random_state=None, *, sphere_method="sobol",
+                           antipodal=False, circle_rule="auto"):
+    """Sphere quadrature nodes and one weight per node.
+
+    Returns ``(points, weights)`` with ``weights`` of shape ``(m,)``.
+
+    In 2D, ``circle_rule`` selects the rule:
+
+    - ``"auto"``: ``"cusp"`` for a ``DiscreteSampler``, ``"equispaced"``
+      otherwise.
+    - ``"cusp"``: ``_cusp_split_directions``. Needs a ``DiscreteSampler``,
+      since the cusps are at the directions perpendicular to its atoms.
+    - ``"equispaced"``: equally spaced angles with equal weights.
+
+    In other dimensions ``circle_rule`` must be ``"auto"`` or
+    ``"equispaced"``, and the nodes come from ``_sphere_directions``.
+    """
+    if circle_rule not in _CIRCLE_RULES:
+        raise ValueError(
+            f"circle_rule must be one of {_CIRCLE_RULES}, got {circle_rule!r}")
+    discrete = isinstance(spectral_measure_sampler, DiscreteSampler)
+    if circle_rule == "cusp" and (d != 2 or not discrete):
+        raise ValueError(
+            "circle_rule='cusp' needs a 2-dimensional DiscreteSampler")
+
+    if d == 2 and discrete and circle_rule in ("auto", "cusp"):
+        return _cusp_split_directions(spectral_measure_sampler.positions,
+                                      spectral_measure_sampler.weights,
+                                      number_of_points)
+    points, weight = _sphere_directions(d, number_of_points, random_state,
+                                        method=sphere_method,
+                                        antipodal=antipodal)
+    return points, np.full(points.shape[0], weight)
+
+
 def _projection_parameters(directions, samples, alpha, mass):
     """``sigma(s)``, ``beta(s)`` and (for alpha == 1) ``mu(s)`` per direction."""
     proj = directions @ samples.T                    # (m, N) = <s_j, V_i>
