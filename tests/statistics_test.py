@@ -501,6 +501,151 @@ class TestMultivariateIsotropicPdfAndEntropy:
             isotropic_entropy(2, 0.02)
 
 
+def isotropic_samples(n, dimensions, alpha, seed=0):
+    """Samples of the isotropic alpha-stable law with characteristic function exp(-|t|^alpha / alpha)."""
+    from scipy.stats import levy_stable
+    rng = np.random.default_rng(seed)
+    if alpha == 2:
+        return rng.normal(size=(n, dimensions))
+    # X = sqrt(A) G for A positive (alpha / 2)-stable and G normal.
+    mixing = levy_stable.rvs(
+        alpha / 2, 1, loc=0, scale=np.cos(np.pi * alpha / 4) ** (2 / alpha), size=n, random_state=rng,
+    )
+    normal = rng.normal(scale=np.sqrt(2) * (1 / alpha) ** (1 / alpha), size=(n, dimensions))
+    return np.sqrt(mixing)[:, None] * normal
+
+
+class TestAlphaPowerBinarySearch:
+
+    @staticmethod
+    def residual(data, power, alpha):
+        """g(P) = -mean ln p(x / P) - h"""
+        data = np.asarray(data, dtype=float).reshape(len(data), -1)
+        return -np.mean(np.log(isotropic_pdf(data / power, alpha))) - isotropic_entropy(data.shape[1], alpha)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_alpha_power_is_the_root(self, alpha, dimensions):
+        data = 3.0 * isotropic_samples(500, dimensions, alpha)
+
+        power = alpha_power(data, alpha)
+
+        assert abs(self.residual(data, power, alpha)) < 1e-4
+        # g decreases with P.
+        assert self.residual(data, 0.9 * power, alpha) > 0 > self.residual(data, 1.1 * power, alpha)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("dimensions", [1, 2, 5])
+    def test_alpha_power_recovers_the_scale(self, alpha, dimensions):
+        """The power of c X is c for X the isotropic law itself."""
+        data = 7.0 * isotropic_samples(20_000, dimensions, alpha)
+
+        assert np.isclose(alpha_power(data, alpha), 7.0, rtol=0.05)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-6, 1e-3, 1e3, 1e6])
+    def test_alpha_power_scales_with_the_data(self, alpha, scale):
+        """P(c X) = c P(X) at any scale, with tol set to the scale of the data."""
+        data = isotropic_samples(300, 2, alpha)
+
+        power = alpha_power(data, alpha, tol=1e-9)
+        scaled_power = alpha_power(scale * data, alpha, tol=1e-9 * scale)
+
+        assert np.isclose(scaled_power, scale * power, rtol=1e-6)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_does_not_depend_on_the_starting_scale(self, alpha):
+        """Powell started from P = 1 whatever the data's scale."""
+        data = 1e5 * isotropic_samples(2000, 1, alpha)
+
+        assert np.isclose(alpha_power(data, alpha), 1e5, rtol=0.1)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_is_in_the_bracket(self, alpha):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(50, 2, alpha)
+        radius = np.linalg.norm(data, axis=1)
+        entropy_radius = _entropy_radius(2, float(alpha))
+
+        power = alpha_power(data, alpha)
+
+        assert radius.min() / entropy_radius <= power <= radius.max() / entropy_radius
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_entropy_radius_is_where_negative_log_pdf_is_the_entropy(self, alpha, dimensions):
+        from aub_htp.statistics.statistics import _entropy_radius
+        entropy_radius = _entropy_radius(dimensions, float(alpha))
+        point = np.zeros((1, dimensions))
+        point[0, 0] = entropy_radius
+
+        assert entropy_radius > 0
+        assert np.isclose(-np.log(isotropic_pdf(point, alpha))[0], isotropic_entropy(dimensions, alpha), atol=1e-6)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 3])
+    def test_alpha_power_of_one_sample_is_its_norm_over_the_entropy_radius(self, alpha, dimensions):
+        """Then a = b, and g(a) = -ln p(x_h) - h = 0."""
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = np.full((1, dimensions), 2.0)
+
+        power = alpha_power(data, alpha)
+
+        assert np.isclose(power, np.linalg.norm(data) / _entropy_radius(dimensions, float(alpha)))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_with_a_zero_sample(self, alpha):
+        """Then a = 0, where g is not defined. The search never evaluates g there."""
+        data = np.vstack([np.zeros((1, 2)), isotropic_samples(200, 2, alpha)])
+
+        power = alpha_power(data, alpha)
+
+        assert np.isfinite(power) and power > 0
+        assert abs(self.residual(data, power, alpha)) < 1e-4
+
+    def test_entropy_radius_is_cached_on_the_settled_alpha(self):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(100, 1, 1.0)
+        alpha_power(data, 1.0)
+        misses = _entropy_radius.cache_info().misses
+
+        alpha_power(data, 1.0 + 1e-9)
+        alpha_power(data, np.array(1.0 - 1e-9))
+
+        assert _entropy_radius.cache_info().misses == misses
+
+    def test_tol_and_max_iter_are_keyword_only(self):
+        data = isotropic_samples(100, 1, 1.5)
+
+        with pytest.raises(TypeError):
+            alpha_power(data, 1.5, 1e-3)
+
+    def test_max_iter_zero_returns_the_middle_of_the_bracket(self):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(100, 2, 1.5)
+        radius = np.linalg.norm(data, axis=1)
+
+        power = alpha_power(data, 1.5, max_iter=0)
+
+        assert np.isclose(power, (radius.min() + radius.max()) / 2 / _entropy_radius(2, 1.5))
+
+    def test_smaller_tol_is_more_accurate(self):
+        data = isotropic_samples(500, 2, 1.5)
+        exact = alpha_power(data, 1.5, tol=1e-12, max_iter=200)
+
+        loose = alpha_power(data, 1.5, tol=1e-1, max_iter=200)
+        tight = alpha_power(data, 1.5, tol=1e-6, max_iter=200)
+
+        assert abs(loose - exact) <= 1e-1
+        assert abs(tight - exact) <= 1e-6
+
+    def test_alpha_two_is_the_root_mean_square(self):
+        data = isotropic_samples(1000, 3, 2.0)
+
+        assert alpha_power(data, 2.0) == np.sqrt(np.mean(np.sum(data ** 2, axis=1)) / 3)
+        assert alpha_power(data, 2.0 - 1e-9) == alpha_power(data, 2.0)
+
+
 def test_statistics_all_lists_the_public_functions():
     import aub_htp.statistics
     assert set(aub_htp.statistics.__all__) == {

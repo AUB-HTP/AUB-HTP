@@ -153,18 +153,25 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
             f"got {data.ndim}D data of shape {data.shape}."
         )
     _, dimensions = data.shape
+    return np.exp(_isotropic_log_pdf(np.linalg.norm(data, axis=1), dimensions, alpha))
+
+
+def _isotropic_log_pdf(radius: np.ndarray, dimensions: int, alpha: float) -> np.ndarray:
+    """ln of the isotropic pdf at points of norm `radius`. alpha comes from _settle_alpha."""
     if alpha == 2:
         # Normal distribution: N(0, I)
-        return (2 * np.pi) ** (-dimensions / 2) * np.exp(-np.sum(data ** 2, axis=1) / 2)
+        return -dimensions / 2 * np.log(2 * np.pi) - radius ** 2 / 2
     elif alpha == 1:
         # Cauchy distribution
-        coefficient = special.gamma((dimensions + 1) / 2) / (np.pi ** ((dimensions + 1) / 2))
-        return coefficient * (1 + np.sum(data ** 2, axis=1)) ** (-(dimensions + 1) / 2)
+        log_coefficient = math.lgamma((dimensions + 1) / 2) - (dimensions + 1) / 2 * np.log(np.pi)
+        return log_coefficient - (dimensions + 1) / 2 * np.log1p(radius ** 2)
     elif dimensions == 1:
         scale = (1 / alpha) ** (1 / alpha)
-        return ht.alpha_stable.pdf(data.ravel(), alpha, 0, loc = 0, scale = scale)
+        # The pdf underflows to 0 far in the tail, which gives -inf.
+        with np.errstate(divide="ignore"):
+            return np.log(ht.alpha_stable.pdf(radius, alpha, 0, loc = 0, scale = scale))
     else:
-        return np.exp(_radial_log_pdf(dimensions, alpha)(np.linalg.norm(data, axis=1)))
+        return _radial_log_pdf(dimensions, alpha)(radius)
 
 
 def isotropic_entropy(dimensions: int, alpha: float) -> float:
@@ -191,36 +198,75 @@ def _isotropic_entropy(dimensions: int, alpha: float) -> float:
         return _radial_log_pdf(dimensions, alpha).entropy
 
 
-def alpha_power(data: np.ndarray, alpha: float) -> float:
+@lru_cache(maxsize=None)
+def _entropy_radius(dimensions: int, alpha: float) -> float:
+    """
+    The radius x_h > 0 where -ln p = h, for p the isotropic pdf and h its entropy.
+
+    -ln p increases with the radius from -ln p(0) < h, so x_h is found by binary search
+    over [0, r_hi], with r_hi = (e^h / V_d)^(1/d) and V_d the volume of the unit ball:
+    p(x) V_d |x|^d <= 1 since p is at least p(x) on the ball of radius |x|, so
+    -ln p >= ln(V_d r_hi^d) = h at r_hi.
+
+    alpha comes from _settle_alpha, so x_h matches the branch the pdf takes.
+    """
+    entropy = isotropic_entropy(dimensions, alpha)
+    # V_d = |S^(d-1)| / d
+    log_ball_volume = _log_unit_sphere_area(dimensions) - np.log(dimensions)
+    low, high = 0.0, float(np.exp((entropy - log_ball_volume) / dimensions))
+    # 100 halvings bring high - low down to the rounding error of x_h.
+    for _ in range(100):
+        middle = (low + high) / 2
+        if -_isotropic_log_pdf(np.array([middle]), dimensions, alpha)[0] < entropy:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2
+
+
+def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_iter: int = 40) -> float:
+    """
+    The alpha-power P of the data: the root of
+
+        g(P) = -mean_k ln p(x_k / P) - h
+
+    for p the isotropic pdf and h its entropy. g decreases with P, so the root is found
+    by binary search. With x_h the radius where -ln p = h:
+
+        a = min_k |x_k| / x_h  gives |x_k| / a >= x_h for every k, so g(a) >= 0
+        b = max_k |x_k| / x_h  gives |x_k| / b <= x_h for every k, so g(b) <= 0
+
+    The search over [a, b] stops when b - a <= tol, or after max_iter iterations. tol is
+    absolute, so it should fit the scale of the data.
+
+    data has shape (n_samples,) for one feature, or (n_samples, n_features).
+    """
     alpha = _settle_alpha(alpha)
     data, _ = _validate_data(data)
+    _, dimensions = data.shape
+    radius = np.linalg.norm(data, axis=1)
 
-    # For all-zero data, -mean(ln p(x / P)) = -ln p(0) < entropy for every P.
+    # For all-zero data, g(P) = -ln p(0) - h < 0 for every P.
     # There is no root, so the power is 0.
-    if not np.any(data):
+    if not np.any(radius):
         return 0.0
 
-    _, dimensions = data.shape
-    entropy = isotropic_entropy(dimensions, alpha)
-    epsilon = np.finfo(float).eps
-    def objective_function(power: float) -> float:
-        if power < 0:
-            return np.inf
-        pdf = np.maximum(isotropic_pdf(data / power, alpha), epsilon)
-        log_pdf = np.log(pdf)
-        expected_log_pdf = np.mean(log_pdf)
-        return (expected_log_pdf + entropy)**2
+    if alpha == 2:
+        return float(np.sqrt(np.mean(radius ** 2) / dimensions))
 
-    return minimize(
-        objective_function,
-        x0 = 1.0,
-        method = "Powell",
-        options = {
-            "maxiter": int(5000),
-            "xtol": float(1e-8),
-            "ftol": float(1e-8),
-        }
-    ).x.item()
+    entropy = isotropic_entropy(dimensions, alpha)
+    entropy_radius = _entropy_radius(dimensions, alpha)
+    low, high = float(radius.min() / entropy_radius), float(radius.max() / entropy_radius)
+    for _ in range(max_iter):
+        if high - low <= tol:
+            break
+        # Never at low, which is 0 if some x_k = 0.
+        middle = (low + high) / 2
+        if -np.mean(_isotropic_log_pdf(radius / middle, dimensions, alpha)) > entropy:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2
 
 
 def deprecated_alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
