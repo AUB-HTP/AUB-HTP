@@ -646,6 +646,116 @@ class TestAlphaPowerBinarySearch:
         assert alpha_power(data, 2.0 - 1e-9) == alpha_power(data, 2.0)
 
 
+class TestAlphaLocationSearch:
+
+    # Tolerances for data of scale about 1: the location is good to about sqrt(power_tol).
+    TIGHT = {"tol": 1e-8, "power_tol": 1e-14, "max_iter": 100}
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_alpha_location_recovers_the_center(self, alpha, dimensions):
+        center = np.array([12.0, -9.0, 4.0])[:dimensions]
+        data = center + 2.0 * isotropic_samples(4000, dimensions, alpha, seed=1)
+
+        location = alpha_location(data, alpha)
+
+        assert np.allclose(location, center, atol=0.3)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    def test_alpha_location_minimizes_the_power(self, alpha, dimensions):
+        data = 5.0 + isotropic_samples(500, dimensions, alpha, seed=2)
+        tolerances = {"tol": self.TIGHT["power_tol"], "max_iter": 100}
+
+        location = np.atleast_1d(alpha_location(data, alpha, **self.TIGHT))
+        power = alpha_power(data - location, alpha, **tolerances)
+
+        for feature in range(dimensions):
+            for step in (-1e-2, 1e-2):
+                moved = location.copy()
+                moved[feature] += step
+                assert alpha_power(data - moved, alpha, **tolerances) > power
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_location_is_translation_equivariant(self, alpha):
+        data = isotropic_samples(500, 2, alpha, seed=3)
+        shift = np.array([200.0, -150.0])
+
+        location = alpha_location(data, alpha, **self.TIGHT)
+        shifted_location = alpha_location(data + shift, alpha, **self.TIGHT)
+
+        assert np.allclose(shifted_location, location + shift, atol=1e-5)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-6, 1e6])
+    def test_alpha_location_scales_with_the_data(self, alpha, scale):
+        """L(c X) = c L(X) at any scale, with the tolerances set to the scale of the data."""
+        data = 3.0 + isotropic_samples(500, 1, alpha, seed=4).ravel()
+        scaled_tolerances = {"tol": 1e-8 * scale, "power_tol": 1e-14 * scale, "max_iter": 100}
+
+        location = alpha_location(data, alpha, **self.TIGHT)
+        scaled_location = alpha_location(scale * data, alpha, **scaled_tolerances)
+
+        assert np.isclose(scaled_location / scale, location, atol=1e-5)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_location_is_in_the_box_of_the_data(self, alpha):
+        data = isotropic_samples(30, 3, alpha, seed=5)
+
+        location = alpha_location(data, alpha)
+
+        assert np.all(location >= data.min(axis=0)) and np.all(location <= data.max(axis=0))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_constant_feature_gets_its_value(self, alpha):
+        data = isotropic_samples(200, 3, alpha, seed=6)
+        data[:, 1] = 7.25
+
+        location = alpha_location(data, alpha)
+
+        assert location[1] == 7.25
+        assert np.all(np.isfinite(location))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("n_samples", [1, 5])
+    def test_constant_data_returns_that_point_without_searching(self, alpha, n_samples, monkeypatch):
+        from aub_htp.statistics import statistics as statistics_module
+
+        def fail(*args, **kwargs):
+            raise AssertionError("Powell should not be called")
+
+        monkeypatch.setattr(statistics_module, "minimize", fail)
+        point = np.array([1.5, -2.0])
+
+        assert np.array_equal(alpha_location(np.tile(point, (n_samples, 1)), alpha), point)
+        assert alpha_location(np.full(n_samples, 3.0), alpha) == 3.0
+
+    def test_alpha_two_is_the_mean(self):
+        data = isotropic_samples(300, 3, 2.0, seed=7) + 4.0
+
+        assert np.array_equal(alpha_location(data, 2.0), data.mean(axis=0))
+        assert np.array_equal(alpha_location(data, 2.0 - 1e-9), data.mean(axis=0))
+
+    def test_tolerances_are_keyword_only(self):
+        with pytest.raises(TypeError):
+            alpha_location(np.array([1.0, 2.0, 3.0]), 1.0, 1e-3)
+
+    def test_smaller_power_tol_is_more_accurate(self):
+        data = 5.0 + isotropic_samples(500, 1, 1.0, seed=8).ravel()
+        exact = alpha_location(data, 1.0, tol=1e-10, power_tol=1e-15, max_iter=100)
+
+        default = alpha_location(data, 1.0)
+        tight = alpha_location(data, 1.0, **self.TIGHT)
+
+        assert abs(default - exact) < 1e-2
+        assert abs(tight - exact) < 1e-5
+
+    def test_deprecated_alpha_location_is_removed(self):
+        from aub_htp.statistics import statistics as statistics_module
+
+        assert not hasattr(statistics_module, "deprecated_alpha_location")
+
+
 def test_statistics_all_lists_the_public_functions():
     import aub_htp.statistics
     assert set(aub_htp.statistics.__all__) == {

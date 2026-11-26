@@ -11,11 +11,7 @@ import numpy as np
 
 
 def _settle_alpha(alpha: float) -> float:
-    """
-    Check alpha and return it as a float, set to exactly 1 or 2 when close to them.
-
-    Every function here calls this, so they all take the same branch for the same alpha.
-    """
+    """Check alpha and return it as a float, set to exactly 1 or 2 when close to them."""
     alpha = float(alpha)
     if np.isclose(alpha, 1):
         return 1.0
@@ -48,11 +44,7 @@ def _log_unit_sphere_area(dimensions: int) -> float:
     """
     ln |S^(d-1)|, the log of the area of the unit sphere in d dimensions.
 
-    |S^0| = 2, |S^1| = 2 pi, and |S^(d-1)| = 2 pi / (d - 2) * |S^(d-3)|, so
-
         |S^(d-1)| = 2^(n + 1) pi^floor(d / 2) / ((d - 2) (d - 4) ...)
-
-    where n is the number of factors of the denominator, which stops at 1 or 2.
     """
     denominator_factors = np.arange(dimensions - 2, 0, -2)
     return float(
@@ -64,68 +56,58 @@ def _log_unit_sphere_area(dimensions: int) -> float:
 
 class _RadialLogPdf:
     """
-    ln f_d(r) of the isotropic alpha-stable pdf in d >= 2 dimensions, for alpha != 1, 2.
+    Table of ln f_d(r), the isotropic alpha-stable log pdf in d >= 2 dimensions, alpha != 1, 2.
 
-    _isotropic_radial_log_pdf is too slow to call on the data at every step of a search, so
-    it is tabulated once on [r_low, r_join] and interpolated. Beyond r_join it uses its
-    series in 1 / r, which is fast, so it is called directly. Below r_low the pdf is f_d(0).
+    Interpolated over ln r on [r_low, r_high]. f_d(0) below, the power law r^-(d + alpha) beyond.
     """
 
     def __init__(self, dimensions: int, alpha: float):
         self.dimensions = dimensions
         self.alpha = alpha
         # exp(-(gamma |t|)^alpha) = exp(-|t|^alpha / alpha)
-        self.gamma_scale = gamma_scale = (1 / alpha) ** (1 / alpha)
+        gamma_scale = (1 / alpha) ** (1 / alpha)
 
-        self.radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale)
-        if not np.isfinite(self.radius_join):
+        radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale)
+        if not np.isfinite(radius_join):
             raise ValueError(
                 f"The isotropic pdf cannot be computed accurately for alpha = {alpha} in {dimensions} dimensions."
             )
-        # f_d(r) = f_d(0) (1 - (r / core)^2 + ...) near 0, so f_d(r_low) = f_d(0) to 1e-6.
+        # f_d(r) = f_d(0) (1 - (r / core)^2 + ...) near 0
         core = np.sqrt(2 * dimensions) * gamma_scale * np.exp(
             0.5 * (math.lgamma(dimensions / alpha) - math.lgamma((dimensions + 2) / alpha))
         )
-        self.radius_low = 1e-3 * min(core, self.radius_join)
+        self.log_radius_low = np.log(1e-3 * min(core, radius_join))
+        # The mass beyond r decays like r^-alpha: stop at exp(-50) of it, and at ln r = 100.
+        self.log_radius_high = max(min(np.log(radius_join) + 50 / alpha, 100.0), np.log(radius_join) + 1)
 
-        n_points = int(60 * np.log10(self.radius_join / self.radius_low)) + 2
-        radius = np.geomspace(self.radius_low, self.radius_join, n_points)
-        # The pdf decreases with r. Rounding must not break this, since alpha_power relies on it.
-        self.log_pdf = np.minimum.accumulate(self._log_pdf(radius))
-        self.interpolator = PchipInterpolator(np.log(radius), self.log_pdf)
+        # About 60 points per decade.
+        n_points = int(26 * (self.log_radius_high - self.log_radius_low)) + 2
+        self.log_radius = np.linspace(self.log_radius_low, self.log_radius_high, n_points)
+        # alpha_power needs the pdf to decrease with r.
+        self.log_pdf = np.minimum.accumulate(
+            _isotropic_radial_log_pdf(np.exp(self.log_radius), alpha, dimensions, gamma_scale)
+        )
+        self.interpolator = PchipInterpolator(self.log_radius, self.log_pdf)
         self.entropy = self._entropy()
 
-    def _log_pdf(self, radius: np.ndarray) -> np.ndarray:
-        return _isotropic_radial_log_pdf(radius, self.alpha, self.dimensions, self.gamma_scale)
-
     def __call__(self, radius: np.ndarray) -> np.ndarray:
-        radius = np.asarray(radius, dtype=float)
-        tail = radius > self.radius_join
-        out = np.empty(radius.shape, dtype=float)
-        out[~tail] = self.interpolator(np.log(np.maximum(radius[~tail], self.radius_low)))
-        if np.any(tail):
-            out[tail] = np.minimum(self._log_pdf(radius[tail]), self.log_pdf[-1])
-        return out
+        with np.errstate(divide="ignore"):
+            log_radius = np.maximum(np.log(radius), self.log_radius_low)
+        beyond = np.maximum(log_radius - self.log_radius_high, 0.0)
+        return self.interpolator(log_radius - beyond) - (self.dimensions + self.alpha) * beyond
 
     def _entropy(self) -> float:
         """
-        h = -int_0^inf |S^(d-1)| r^(d-1) f_d(r) ln f_d(r) dr
-
-        integrated over s = ln r, where r^(d-1) dr = r^d ds.
+        h = -int |S^(d-1)| r^(d-1) f_d(r) ln f_d(r) dr, over s = ln r, with r^(d-1) dr = r^d ds.
         """
         d = self.dimensions
         log_area = _log_unit_sphere_area(d)
-        log_low, log_join = np.log(self.radius_low), np.log(self.radius_join)
-        # The integrand decays like s exp(-alpha s): stop where exp(-alpha s) has lost a factor
-        # exp(-50), but not beyond ln r = 700, where r overflows.
-        log_high = max(min(log_join + 50 / self.alpha, 700.0), log_join + 1)
-        s = np.linspace(log_low, log_high, 2 * int((log_high - log_low) / 0.02) + 3)
-        log_pdf = self(np.exp(s))
-        # On [0, r_low] the pdf is f_d(0), and the ball has volume |S^(d-1)| r^d / d.
-        inner_mass = np.exp(log_area + d * log_low + self.log_pdf[0]) / d
+        mass_density = np.exp(log_area + d * self.log_radius + self.log_pdf)
+        # Mass of the ball of radius r_low, where the pdf is f_d(0).
+        inner_mass = mass_density[0] / d
         return float(
             -inner_mass * self.log_pdf[0]
-            - simpson(np.exp(log_area + d * s + log_pdf) * log_pdf, x=s)
+            - simpson(mass_density * self.log_pdf, x=self.log_radius)
         )
 
 
@@ -157,7 +139,7 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
 
 
 def _isotropic_log_pdf(radius: np.ndarray, dimensions: int, alpha: float) -> np.ndarray:
-    """ln of the isotropic pdf at points of norm `radius`. alpha comes from _settle_alpha."""
+    """ln of the isotropic pdf at points of norm `radius`."""
     if alpha == 2:
         # Normal distribution: N(0, I)
         return -dimensions / 2 * np.log(2 * np.pi) - radius ** 2 / 2
@@ -167,7 +149,7 @@ def _isotropic_log_pdf(radius: np.ndarray, dimensions: int, alpha: float) -> np.
         return log_coefficient - (dimensions + 1) / 2 * np.log1p(radius ** 2)
     elif dimensions == 1:
         scale = (1 / alpha) ** (1 / alpha)
-        # The pdf underflows to 0 far in the tail, which gives -inf.
+        # -inf where the pdf underflows.
         with np.errstate(divide="ignore"):
             return np.log(ht.alpha_stable.pdf(radius, alpha, 0, loc = 0, scale = scale))
     else:
@@ -181,7 +163,6 @@ def isotropic_entropy(dimensions: int, alpha: float) -> float:
 
 @lru_cache(maxsize=None)
 def _isotropic_entropy(dimensions: int, alpha: float) -> float:
-    # alpha comes from _settle_alpha, so values close to 1 or 2 share one cache entry.
     if alpha == 2:
         # Normal distribution: N(0, I)
         return float(0.5 * dimensions * np.log(2 * np.pi * np.e))
@@ -201,20 +182,15 @@ def _isotropic_entropy(dimensions: int, alpha: float) -> float:
 @lru_cache(maxsize=None)
 def _entropy_radius(dimensions: int, alpha: float) -> float:
     """
-    The radius x_h > 0 where -ln p = h, for p the isotropic pdf and h its entropy.
+    The radius x_h where -ln p = h, for p the isotropic pdf and h its entropy.
 
-    -ln p increases with the radius from -ln p(0) < h, so x_h is found by binary search
-    over [0, r_hi], with r_hi = (e^h / V_d)^(1/d) and V_d the volume of the unit ball:
-    p(x) V_d |x|^d <= 1 since p is at least p(x) on the ball of radius |x|, so
-    -ln p >= ln(V_d r_hi^d) = h at r_hi.
-
-    alpha comes from _settle_alpha, so x_h matches the branch the pdf takes.
+    Binary search over [0, r_hi], with r_hi = (e^h / V_d)^(1/d) and V_d the volume of the unit ball.
     """
     entropy = isotropic_entropy(dimensions, alpha)
     # V_d = |S^(d-1)| / d
     log_ball_volume = _log_unit_sphere_area(dimensions) - np.log(dimensions)
     low, high = 0.0, float(np.exp((entropy - log_ball_volume) / dimensions))
-    # 100 halvings bring high - low down to the rounding error of x_h.
+    # Enough halvings to reach the rounding error of x_h.
     for _ in range(100):
         middle = (low + high) / 2
         if -_isotropic_log_pdf(np.array([middle]), dimensions, alpha)[0] < entropy:
@@ -230,14 +206,11 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
 
         g(P) = -mean_k ln p(x_k / P) - h
 
-    for p the isotropic pdf and h its entropy. g decreases with P, so the root is found
-    by binary search. With x_h the radius where -ln p = h:
+    for p the isotropic pdf and h its entropy.
 
-        a = min_k |x_k| / x_h  gives |x_k| / a >= x_h for every k, so g(a) >= 0
-        b = max_k |x_k| / x_h  gives |x_k| / b <= x_h for every k, so g(b) <= 0
-
-    The search over [a, b] stops when b - a <= tol, or after max_iter iterations. tol is
-    absolute, so it should fit the scale of the data.
+    Binary search over [min_k |x_k| / x_h, max_k |x_k| / x_h], with x_h the radius where
+    -ln p = h. It stops when the interval is at most tol, or after max_iter iterations.
+    tol is absolute, so it should fit the scale of the data.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
     """
@@ -246,8 +219,7 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     _, dimensions = data.shape
     radius = np.linalg.norm(data, axis=1)
 
-    # For all-zero data, g(P) = -ln p(0) - h < 0 for every P.
-    # There is no root, so the power is 0.
+    # g(P) < 0 for every P: no root.
     if not np.any(radius):
         return 0.0
 
@@ -260,7 +232,6 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     for _ in range(max_iter):
         if high - low <= tol:
             break
-        # Never at low, which is 0 if some x_k = 0.
         middle = (low + high) / 2
         if -np.mean(_isotropic_log_pdf(radius / middle, dimensions, alpha)) > entropy:
             low = middle
@@ -269,62 +240,60 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     return (low + high) / 2
 
 
-def deprecated_alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
-    data = np.asarray(data)
-    data_is_one_dimensional = data.ndim == 1
-    if data_is_one_dimensional:
-        data = data.reshape(-1, 1)
-    optimal_location = minimize(
-        lambda location: alpha_power(data - location, alpha),
-        x0 = np.median(data, axis = 0),
-        method = "Powell",
-        options = {
-            "maxiter": int(5000),
-            "xtol": float(1e-8),
-            "ftol": float(1e-8),
-        },
-    ).x
-    if data_is_one_dimensional:
-        return optimal_location.item()
-    else:
-        return optimal_location
+def alpha_location(
+    data: np.ndarray,
+    alpha: float,
+    *,
+    tol: float = 2.0 ** -20,
+    power_tol: float = 2.0 ** -20,
+    max_iter: int = 40,
+) -> np.ndarray:
+    """
+    The alpha-location of the data: arg min over mu of alpha_power(data - mu).
 
+    Powell search in the box of the data, starting from the median. A constant feature
+    gets its value. For alpha = 2 the location is the mean.
 
-def alpha_location(data: np.ndarray, alpha: float) -> np.ndarray:
+    tol is the tolerance for mu. power_tol and max_iter are passed to alpha_power.
+    The tolerances are absolute, so they should fit the scale of the data.
+    mu cannot be more accurate than about sqrt(power_tol * power).
+
+    data has shape (n_samples,) for one feature, or (n_samples, n_features).
+    """
     alpha = _settle_alpha(alpha)
     data, data_is_one_dimensional = _validate_data(data)
 
-    _, dimensions = data.shape
-
-    entropy = isotropic_entropy(dimensions, alpha)
-    epsilon = np.finfo(float).eps
-    penalty = 1e6
-
-    def objective_function(log_power_and_location: np.ndarray) -> float: #TODO: ask profs about this objective function
-        power = log_power_and_location[0]
-        location = log_power_and_location[1:]
-        if power < 0:
-            return np.inf
-
-        pdf = np.maximum(isotropic_pdf((data - location) / power, alpha), epsilon)
-        log_pdf = np.log(pdf)
-        residual = np.mean(log_pdf) + entropy
-
-        return power + penalty * residual**2
-
-    optimal_log_power_and_location = minimize(
-        objective_function,
-        x0 = np.concatenate(([1.0], np.median(data, axis = 0))),
-        method = "Powell",
-        options = {
-            "maxiter": int(5000),
-            "xtol": float(1e-8),
-            "ftol": float(1e-8),
-        },
-    ).x
-
-    optimal_location = optimal_log_power_and_location[1:]
-    if data_is_one_dimensional:
-        return optimal_location.item()
+    if alpha == 2:
+        location = np.mean(data, axis=0)
     else:
-        return optimal_location
+        low, high = np.min(data, axis=0), np.max(data, axis=0)
+        location = low.copy()
+        searched = high > low
+        if np.any(searched):
+            start = np.median(data[:, searched], axis=0)
+
+            def power(offset: np.ndarray) -> float:
+                location[searched] = start + unit * offset
+                return alpha_power(data - location, alpha, tol=power_tol, max_iter=max_iter)
+
+            # mu = start + unit * offset, with unit the power at the start, so that
+            # Powell's tolerances are relative to the scale of the data.
+            unit = 1.0
+            unit = power(np.zeros_like(start))
+            relative_tol = float(np.clip(tol / unit, np.finfo(float).eps, 1.0))
+            offset = minimize(
+                power,
+                x0 = np.zeros_like(start),
+                method = "Powell",
+                bounds = list(zip((low[searched] - start) / unit, (high[searched] - start) / unit)),
+                options = {
+                    "xtol": relative_tol,
+                    "ftol": relative_tol ** 2,
+                },
+            ).x
+            location[searched] = start + unit * offset
+
+    if data_is_one_dimensional:
+        return location.item()
+    else:
+        return location

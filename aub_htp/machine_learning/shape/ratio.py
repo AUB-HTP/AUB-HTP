@@ -1,8 +1,6 @@
 from typing import Literal
 import numpy as np
-from aub_htp.statistics import alpha_location, alpha_power
-
-from .utils import warn_pairs_without_samples
+from .utils import fit_location_and_power, warn_pairs_without_samples
 
 RatioEquationLiteral = Literal[1, 2, 3]
 
@@ -63,13 +61,8 @@ def fit_cauchy_1d(data: np.ndarray) -> tuple[float, float]:
 
     Returns (μ̂, γ̂).
     """
-    mu_hat = alpha_location(data, alpha=1.0)
-    mu_hat = float(np.squeeze(mu_hat))
-
     # For α=1, the α-power of the data centered at μ̂ equals the Cauchy scale γ.
-    gamma_hat = alpha_power(data - mu_hat, alpha=1.0)
-
-    return mu_hat, gamma_hat
+    return fit_location_and_power(data, alpha=1.0)
 
 
 def compute_correlation_element(

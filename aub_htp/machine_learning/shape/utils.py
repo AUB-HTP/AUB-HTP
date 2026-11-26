@@ -1,6 +1,24 @@
 import warnings
 import numpy as np
-from aub_htp.statistics import alpha_power
+from aub_htp.statistics import alpha_location, alpha_power
+
+
+def fit_location_and_power(data: np.ndarray, alpha: float) -> tuple[float, float]:
+    """
+    alpha-location of 1-D data, and the alpha-power of the data centered at it.
+
+    Their absolute tolerances are set from the interquartile range of the data.
+    """
+    first_quartile, third_quartile = np.percentile(data, [25, 75])
+    scale = third_quartile - first_quartile
+    if scale == 0:
+        scale = np.ptp(data) or 1.0
+    # The location is accurate to about sqrt(power_tol * power).
+    tolerances = {"power_tol": 2.0 ** -40 * scale, "max_iter": 100}
+    location = float(alpha_location(data, alpha, tol=2.0 ** -20 * scale, **tolerances))
+    power = alpha_power(data - location, alpha, tol=tolerances["power_tol"], max_iter=100)
+    return location, power
+
 
 def compute_feature_wise_power(data: np.ndarray, alpha: float) -> np.ndarray:
     if data.ndim != 2:
