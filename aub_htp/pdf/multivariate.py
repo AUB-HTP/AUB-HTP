@@ -960,15 +960,25 @@ class MultivariateStableDensity:
     number_of_spectral_samples : int, optional
         Monte-Carlo samples used for ``sigma``/``beta``/``mu``.
     number_of_sphere_points : int, optional
-        Sphere quadrature nodes.  Defaults to 360 for ``d == 2`` (the angular
-        integrand is smooth and periodic, so this is already converged) and
-        4096 otherwise (a power of two preserves Sobol balance properties).
+        Sphere quadrature size.  Defaults to 360 for ``d == 2`` and 4096
+        otherwise (a power of two preserves Sobol balance properties).  For
+        the 2D cusp rule (see ``circle_rule``) it sets the largest panel
+        width, ``5 pi / number_of_sphere_points``, rather than the number of
+        directions; ``directions.shape[0]`` gives the actual count (2144 for
+        4 atoms on 2 lines at the default).
     sphere_method : {"mc", "sobol"}, optional
         Higher-dimensional sphere-node generator.  Ignored in dimensions one
         and two.  Defaults to scrambled Sobol, which has substantially lower
         error and seed variance in the bundled convergence benchmark.
     antipodal : bool, optional
         Pair each higher-dimensional node with its negative.
+    circle_rule : {"auto", "cusp", "equispaced"}, optional
+        Direction rule in 2D.  ``"auto"`` uses ``"cusp"`` for a
+        ``DiscreteSampler`` and ``"equispaced"`` otherwise.  ``"cusp"`` cuts
+        the circle at the directions perpendicular to the atoms, where the
+        integrand has a cusp, and places graded Gauss-Legendre panels on each
+        arc.  ``"equispaced"`` uses equally spaced angles; for discrete
+        measures it converges only like ``m^-(1 + alpha)``.
     random_state : None | int | np.random.Generator, optional
         Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
     exact : bool, optional
@@ -983,7 +993,7 @@ class MultivariateStableDensity:
                  shift=0.0, number_of_spectral_samples=200_000,
                  number_of_sphere_points=None, random_state=None,
                  exact=False, projection_batch_size=1_000,
-                 sphere_method="sobol", antipodal=False):
+                 sphere_method="sobol", antipodal=False, circle_rule="auto"):
         if not 0.0 < alpha <= 2.0:
             raise ValueError(f"alpha must lie in (0, 2], got {alpha}")
         alpha = float(alpha)
@@ -1009,9 +1019,11 @@ class MultivariateStableDensity:
             number_of_sphere_points = 360 if d == 2 else 4096
         self.number_of_sphere_points = int(number_of_sphere_points)
 
-        self.directions, self.weight = _sphere_directions(
-            d, self.number_of_sphere_points, random_state,
-            method=sphere_method, antipodal=antipodal)
+        self.circle_rule = circle_rule
+        self.directions, self.quad_weights = _quadrature_directions(
+            d, self.number_of_sphere_points, spectral_measure_sampler,
+            random_state, sphere_method=sphere_method, antipodal=antipodal,
+            circle_rule=circle_rule)
         if isinstance(spectral_measure_sampler, IsotropicSampler):
             self.sigma, self.beta, self.mu = _projection_parameters_isotropic(
                 self.directions, spectral_measure_sampler.gamma, alpha)
@@ -1125,7 +1137,7 @@ class MultivariateStableDensity:
             g = self._kernel_values(
                 v.ravel(), np.broadcast_to(beta_valid, v.shape).ravel()
             ).reshape(v.shape)
-            densities[lo:lo + rows] = self.weight * (g * scale).sum(axis=1)
+            densities[lo:lo + rows] = (g * scale) @ self.quad_weights[valid]
 
         np.maximum(densities, 0.0, out=densities)
         return densities[0] if single else densities
@@ -1143,6 +1155,7 @@ def get_pdf_model(
     exact: bool = False,
     sphere_method: str = "sobol",
     antipodal: bool = False,
+    circle_rule: str = "auto",
 ) -> MultivariateStableDensity:
     """Return a cached density model, constructing it on a cache miss."""
     key = (
@@ -1155,6 +1168,7 @@ def get_pdf_model(
         bool(exact),
         sphere_method,
         bool(antipodal),
+        str(circle_rule),
     )
     try:
         model = _pdf_model_cache.pop(key)
@@ -1169,6 +1183,7 @@ def get_pdf_model(
             exact=exact,
             sphere_method=sphere_method,
             antipodal=antipodal,
+            circle_rule=circle_rule,
         )
     _pdf_model_cache[key] = model
     if len(_pdf_model_cache) > _PDF_MODEL_CACHE_MAXSIZE:
@@ -1187,6 +1202,7 @@ def multivariate_alpha_stable_pdf(
     exact=False,
     sphere_method="sobol",
     antipodal=False,
+    circle_rule="auto",
 ):
     """Numerical multivariate alpha-stable density.
 
@@ -1216,6 +1232,9 @@ def multivariate_alpha_stable_pdf(
         Higher-dimensional sphere-node generator.
     antipodal : bool, optional
         Pair higher-dimensional sphere nodes with their negatives.
+    circle_rule : {"auto", "cusp", "equispaced"}, optional
+        Direction rule in 2D.  ``"auto"`` splits the circle at the cusps for
+        a ``DiscreteSampler`` and uses equally spaced angles otherwise.
 
     Returns
     -------
@@ -1232,5 +1251,6 @@ def multivariate_alpha_stable_pdf(
         exact=exact,
         sphere_method=sphere_method,
         antipodal=antipodal,
+        circle_rule=circle_rule,
     )
     return model.pdf(x)

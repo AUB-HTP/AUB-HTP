@@ -312,6 +312,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         exact: bool = False,
         sphere_method: str = "sobol",
         antipodal: bool = False,
+        circle_rule: str = "auto",
     ) -> npt.NDArray:
         """Evaluate the multivariate alpha-stable density at point(s) x.
 
@@ -331,6 +332,7 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
             exact,
             sphere_method,
             antipodal,
+            circle_rule,
         )
         return model.pdf(x)
 
