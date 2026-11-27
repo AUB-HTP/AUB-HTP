@@ -745,7 +745,6 @@ def _cusp_split_directions(positions, weights, alpha, number_of_points, *,
             [[0.0], ratio ** np.arange(n_levels, 0, -1), [1.0]])
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
             pieces = max(1, int(np.ceil((b - a) / max_panel - 1e-12)))
-            width = (b - a) / pieces
             if k < n_levels:
                 n_pts = min(p_min + growth * k, p)
             elif n_levels == 0:
@@ -820,7 +819,7 @@ def _quadrature_directions(d, number_of_points, spectral_measure_sampler, alpha,
                 and _cusp_lines(positions, weights, alpha)[0].size > _AUTO_MAX_CUSP_LINES):
             return _half_circle_equispaced(_FALLBACK_FACTOR * number_of_points)
         return _cusp_split_directions(positions, weights, alpha, number_of_points)
-    
+
     points, weight = _sphere_directions(d, number_of_points, random_state,
                                         method=sphere_method,
                                         antipodal=antipodal)
@@ -1318,8 +1317,10 @@ def multivariate_alpha_stable_pdf(
         Pair higher-dimensional sphere nodes with their negatives.
     circle_rule : {"auto", "cusp", "equispaced"}, optional
         Direction rule in 2D.  ``"auto"`` splits the circle at the cusps for
-        a ``DiscreteSampler`` and uses equally spaced angles otherwise. 
-        Only ``"auto"`` is accepted outside 2D.
+        a ``DiscreteSampler`` with at most 16 cusp lines, uses equally spaced
+        directions for one with more, and equally spaced angles for other
+        samplers.  See ``MultivariateStableDensity``.  Only ``"auto"`` is
+        accepted outside 2D.
 
     Returns
     -------
