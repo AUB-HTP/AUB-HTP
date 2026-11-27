@@ -1,7 +1,6 @@
 import math
 from functools import lru_cache
 from scipy.optimize import minimize, brentq
-import aub_htp as ht
 from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf, _isotropic_series_radius
 from scipy import special
 from scipy.integrate import simpson
@@ -56,7 +55,7 @@ def _log_unit_sphere_area(dimensions: int) -> float:
 
 class _RadialLogPdf:
     """
-    Table of ln f_d(r), the isotropic alpha-stable log pdf in d >= 2 dimensions, alpha != 1, 2.
+    Table of ln f_d(r), the isotropic alpha-stable log pdf in d dimensions, alpha != 1, 2.
 
     Interpolated over ln r on [r_low, r_high]. f_d(0) below, the power law r^-(d + alpha) beyond.
     """
@@ -154,11 +153,6 @@ def _isotropic_log_pdf(radius: np.ndarray, dimensions: int, alpha: float) -> np.
         # Cauchy distribution
         log_coefficient = math.lgamma((dimensions + 1) / 2) - (dimensions + 1) / 2 * np.log(np.pi)
         return log_coefficient - (dimensions + 1) / 2 * np.log1p(radius ** 2)
-    elif dimensions == 1:
-        scale = (1 / alpha) ** (1 / alpha)
-        # -inf where the pdf underflows.
-        with np.errstate(divide="ignore"):
-            return np.log(ht.alpha_stable.pdf(radius, alpha, 0, loc = 0, scale = scale))
     else:
         return _radial_log_pdf(dimensions, alpha)(radius)
 
@@ -180,8 +174,6 @@ def _isotropic_entropy(dimensions: int, alpha: float) -> float:
             + ((dimensions + 1) / 2)
             * (special.digamma((dimensions + 1) / 2) - special.digamma(0.5))
         )
-    elif dimensions == 1:
-        return float(ht.alpha_stable.entropy(alpha, 0, loc = 0, scale = (1 / alpha) ** (1 / alpha)))
     else:
         return _radial_log_pdf(dimensions, alpha).entropy
 
