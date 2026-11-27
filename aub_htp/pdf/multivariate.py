@@ -650,6 +650,182 @@ def _sphere_directions(d, number_of_points, random_state=None, *, method="mc",
     return points, weight
 
 
+def _cusp_lines(positions, weights, alpha, merge_tol=1e-6):
+    """Cusp angles of ``sigma(s)^alpha`` in 2D (modulo ``pi``) and their strengths.
+
+    An atom ``p`` with weight ``w`` and angle ``phi`` contributes
+    ``w |p|^alpha |cos(theta - phi)|^alpha`` to ``sigma(theta)^alpha``. That
+    term has a cusp at ``phi + pi/2`` (mod ``pi``) whose size is the atom's
+    strength ``w |p|^alpha``. Atoms on the same line (``p`` and ``-p``
+    included) share one cusp, and their strengths add. Cusps whose
+    consecutive gaps, on the circle of length ``pi``, are below ``merge_tol``
+    are merged at their strength-weighted mean. Atoms with zero weight or at
+    the origin are skipped.
+
+    Returns ``(angles, strengths)`` with ``angles`` sorted in ``[0, pi)``.
+    """
+    positions = np.asarray(positions, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    norms = np.linalg.norm(positions, axis=1)
+    keep = (weights > 0.0) & (norms > 0.0)
+    if not np.any(keep):
+        return np.empty(0), np.empty(0)
+    psi = np.mod(np.arctan2(positions[keep, 1], positions[keep, 0]) + np.pi / 2,
+                 np.pi)
+    strength = weights[keep] * norms[keep] ** alpha
+    order = np.argsort(psi)
+    psi, strength = psi[order], strength[order]
+    if psi.size > 1:
+        # Start after the largest gap so that no cluster straddles the wrap.
+        gaps = np.diff(np.append(psi, psi[0] + np.pi))
+        start = int(np.argmax(gaps)) + 1
+        psi = np.concatenate([psi[start:], psi[:start] + np.pi])
+        strength = np.concatenate([strength[start:], strength[:start]])
+    groups = np.cumsum(np.concatenate([[True], np.diff(psi) > merge_tol])) - 1
+    total = np.bincount(groups, weights=strength)
+    angles = np.mod(np.bincount(groups, weights=strength * psi) / total, np.pi)
+    order = np.argsort(angles)
+    return angles[order], total[order]
+
+
+def _cusp_breakpoints(positions, weights, alpha, *, merge_tol=1e-6):
+    """Angles in ``[0, pi)`` at which the 2D rule cuts the circle, one per cusp line."""
+    return _cusp_lines(positions, weights, alpha, merge_tol)[0]
+
+
+def _cusp_split_directions(positions, weights, alpha, number_of_points, *,
+                           levels=6, ratio=0.15, p_min=4, growth=2, p=12,
+                           cusp_width=1e-5, merge_tol=1e-6):
+    """Composite Gauss-Legendre rule on the circle for a discrete measure.
+
+    Returns ``(points, weights)`` with ``points`` of shape ``(m, 2)`` and
+    ``int_{S^1} f ds ~= sum_j weights[j] f(points[j])`` for the density
+    integrand ``f``.
+
+    Half circle. ``sigma(-s) = sigma(s)``, ``beta(-s) = -beta(s)``,
+    ``mu(-s) = -mu(s)`` and ``<x, -s> = -<x, s>``, so ``v(-s) = -v(s)``, and
+    ``g(-v, -beta) = g(v, beta)``. The integrand takes the same value at ``s``
+    and ``-s``, so the rule covers ``[b_0, b_0 + pi)`` with doubled weights.
+
+    Arcs. The half circle is cut at every cusp of ``sigma(s)^alpha`` (see
+    ``_cusp_breakpoints``), so each arc has a cusp only at its two ends.
+
+    Grading. On each half of an arc, panel edges shrink geometrically toward
+    the cusp (``ratio**k`` of the half-arc) until the panel next to the cusp
+    is narrower than ``cusp_width``, with at most ``levels`` levels. A half-arc
+    already narrower than ``cusp_width`` is not graded.
+
+    Width cap. Every panel is split into equal pieces no wider than
+    ``max_panel = 5 pi / number_of_points`` (2.5 degrees at 360). This
+    resolves the narrow kernel peak at the direction perpendicular to ``x``,
+    which can lie anywhere on an arc.
+
+    Points. Graded panels get ``min(p_min + growth * k, p)`` Gauss-Legendre
+    points (``k`` counted from the cusp), the other pieces ``p``. A half-arc
+    narrower than ``cusp_width`` is a single ``p_min``-point panel.
+
+    ``number_of_points`` sets the spacing, not the number of directions. At
+    360, ``k`` evenly spaced atom lines give 944, 1072, 1360, 1600, 2000 and
+    2048 directions for ``k`` = 1, 2, 5, 8, 10 and 16; in general at most
+    ``128 k + 12 pi / max_panel``.
+    """
+    breaks = _cusp_breakpoints(positions, weights, alpha, merge_tol=merge_tol)
+    if breaks.size == 0:
+        raise ValueError("the spectral measure has no atom with positive weight")
+    max_panel = 5.0 * np.pi / number_of_points
+    ends = np.append(breaks, breaks[0] + np.pi)
+    rules = {}
+
+    angles, quad = [], []
+    for lo, hi in zip(ends[:-1], ends[1:]):
+        half = 0.5 * (hi - lo)
+        n_levels = int(np.clip(np.ceil(np.log(cusp_width / half) / np.log(ratio)),
+                               0, levels))
+        edges = half * np.concatenate(
+            [[0.0], ratio ** np.arange(n_levels, 0, -1), [1.0]])
+        for k, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
+            pieces = max(1, int(np.ceil((b - a) / max_panel - 1e-12)))
+            if k < n_levels:
+                n_pts = min(p_min + growth * k, p)
+            elif n_levels == 0:
+                n_pts = p_min            # the whole half-arc is narrower than cusp_width
+            else:
+                n_pts = p
+            if n_pts not in rules:
+                rules[n_pts] = np.polynomial.legendre.leggauss(n_pts)
+            xg, wg = rules[n_pts]
+            cuts = np.linspace(a, b, pieces + 1)
+            for c0, c1 in zip(cuts[:-1], cuts[1:]):
+                for x0, x1 in ((lo + c0, lo + c1), (hi - c1, hi - c0)):
+                    angles.append(0.5 * (x0 + x1) + 0.5 * (x1 - x0) * xg)
+                    quad.append(0.5 * (x1 - x0) * wg)
+    angles = np.concatenate(angles)
+    quad = 2.0 * np.concatenate(quad)        # s and -s contribute equally
+    order = np.argsort(np.mod(angles, 2.0 * np.pi))
+    angles, quad = angles[order], quad[order]
+    return np.column_stack([np.cos(angles), np.sin(angles)]), quad
+
+
+_CIRCLE_RULES = ("auto", "cusp", "equispaced")
+
+_AUTO_MAX_CUSP_LINES = 16
+_FALLBACK_FACTOR = 3
+
+
+def _half_circle_equispaced(m):
+    """``m`` equally spaced directions on ``[0, pi)`` with weights ``2 pi / m``.
+
+    The integrand takes the same value at ``s`` and ``-s``, so this gives
+    the same result as ``2 m`` equally spaced directions on the full circle.
+    """
+    phi = np.pi * np.arange(m) / m
+    return np.column_stack([np.cos(phi), np.sin(phi)]), np.full(m, 2.0 * np.pi / m)
+
+
+def _quadrature_directions(d, number_of_points, spectral_measure_sampler, alpha,
+                           random_state=None, *, sphere_method="sobol",
+                           antipodal=False, circle_rule="auto"):
+    """Sphere quadrature nodes and one weight per node.
+
+    Returns ``(points, weights)`` with ``weights`` of shape ``(m,)``.
+
+    In 2D, ``circle_rule`` selects the rule:
+
+    - ``"auto"``: for a ``DiscreteSampler``, ``"cusp"`` if it has at most 16
+      cusp lines, otherwise ``3 * number_of_points`` equally spaced directions
+      on the half circle (the same result as ``6 * number_of_points`` on the
+      full circle). ``"equispaced"`` for other samplers.
+    - ``"cusp"``: ``_cusp_split_directions``, cutting at every cusp line.
+    - ``"equispaced"``: equally spaced angles with equal weights.
+
+    Outside 2D only ``"auto"`` is accepted, and the nodes come from
+    ``_sphere_directions``.
+    """
+    if circle_rule not in _CIRCLE_RULES:
+        raise ValueError(
+            f"circle_rule must be one of {_CIRCLE_RULES}, got {circle_rule!r}")
+    if d != 2 and circle_rule != "auto":
+        raise ValueError(
+            f"circle_rule={circle_rule!r} only applies in 2D; the measure is "
+            f"{d}-dimensional, so use circle_rule='auto'")
+    discrete = isinstance(spectral_measure_sampler, DiscreteSampler)
+    if circle_rule == "cusp" and not discrete:
+        raise ValueError("circle_rule='cusp' needs a DiscreteSampler")
+
+    if d == 2 and discrete and circle_rule != "equispaced":
+        positions = spectral_measure_sampler.positions
+        weights = spectral_measure_sampler.weights
+        if (circle_rule == "auto"
+                and _cusp_lines(positions, weights, alpha)[0].size > _AUTO_MAX_CUSP_LINES):
+            return _half_circle_equispaced(_FALLBACK_FACTOR * number_of_points)
+        return _cusp_split_directions(positions, weights, alpha, number_of_points)
+
+    points, weight = _sphere_directions(d, number_of_points, random_state,
+                                        method=sphere_method,
+                                        antipodal=antipodal)
+    return points, np.full(points.shape[0], weight)
+
+
 def _projection_parameters(directions, samples, alpha, mass):
     """``sigma(s)``, ``beta(s)`` and (for alpha == 1) ``mu(s)`` per direction."""
     proj = directions @ samples.T                    # (m, N) = <s_j, V_i>
@@ -718,29 +894,44 @@ def _projection_parameters_batched(directions, samples, alpha, mass,
     return sigma, beta, mu
 
 
-def _projection_parameters_discrete(directions, positions, weights, alpha):
-    """Exact projection parameters for a finite spectral measure."""
+def _projection_parameters_discrete(directions, positions, weights, alpha, *,
+                                    block_size=1_000_000):
+    """Exact projection parameters for a finite spectral measure.
+
+    Directions are processed in blocks of about ``block_size / n_atoms``
+    rows, so memory is ``O(m + block_size)`` instead of ``O(m * n_atoms)``.
+    Each direction's sums are computed whole within one block. Atoms with
+    zero weight or at the origin contribute nothing and are dropped.
+    """
     directions = np.asarray(directions, dtype=np.float64)
     positions = np.asarray(positions, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
-    proj = directions @ positions.T
-    abs_proj = np.abs(proj)
-    weighted_abs_alpha = abs_proj ** alpha * weights[None, :]
-    sigma_alpha = np.sum(weighted_abs_alpha, axis=1)
-    numerator = np.sum(np.sign(proj) * weighted_abs_alpha, axis=1)
+    norms = np.linalg.norm(positions, axis=1)
+    keep = (weights > 0.0) & (norms > 0.0)
+    positions, weights, norms = positions[keep], weights[keep], norms[keep]
+
+    m = directions.shape[0]
+    sigma_alpha = np.zeros(m)
+    numerator = np.zeros(m)
+    sum_mu = np.zeros(m) if alpha == 1.0 else None
+    rows = max(1, int(block_size) // max(positions.shape[0], 1))
+    for lo in range(0, m, rows):
+        proj = directions[lo:lo + rows] @ positions.T
+        abs_proj = np.abs(proj)
+        weighted_abs_alpha = abs_proj ** alpha * weights[None, :]
+        sigma_alpha[lo:lo + rows] = np.sum(weighted_abs_alpha, axis=1)
+        numerator[lo:lo + rows] = np.sum(np.sign(proj) * weighted_abs_alpha, axis=1)
+        if sum_mu is not None:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_unit = np.log(abs_proj / norms[None, :])
+            log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
+            sum_mu[lo:lo + rows] = np.sum(proj * log_unit * weights[None, :], axis=1)
+
     sigma = sigma_alpha ** (1.0 / alpha)
     beta = np.divide(numerator, sigma_alpha, out=np.zeros_like(numerator),
                      where=sigma_alpha > 0.0)
     beta = np.clip(beta, -1.0, 1.0)
-
-    mu = None
-    if alpha == 1.0:
-        position_norms = np.linalg.norm(positions, axis=1)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            log_unit = np.log(abs_proj / position_norms[None, :])
-        log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
-        mu = -(2.0 / np.pi) * np.sum(
-            proj * log_unit * weights[None, :], axis=1)
+    mu = None if sum_mu is None else -(2.0 / np.pi) * sum_mu
     return sigma, beta, mu
 
 
@@ -845,15 +1036,32 @@ class MultivariateStableDensity:
     number_of_spectral_samples : int, optional
         Monte-Carlo samples used for ``sigma``/``beta``/``mu``.
     number_of_sphere_points : int, optional
-        Sphere quadrature nodes.  Defaults to 360 for ``d == 2`` (the angular
-        integrand is smooth and periodic, so this is already converged) and
-        4096 otherwise (a power of two preserves Sobol balance properties).
+        Sphere quadrature size.  Defaults to 360 for ``d == 2`` and 4096
+        otherwise (a power of two preserves Sobol balance properties).  For
+        the 2D cusp rule (see ``circle_rule``) it sets the largest panel
+        width, ``5 pi / number_of_sphere_points``, rather than the number of
+        directions; ``directions.shape[0]`` gives the actual count (1072 for
+        4 atoms on 2 lines at the default).  For small ``alpha`` and points
+        far out relative to the projection scale, raise it: at
+        ``alpha = 0.5`` and ``|x|`` about ``7 sigma``, 360 gives about 1e-3
+        and 720 about 1e-6.
     sphere_method : {"mc", "sobol"}, optional
         Higher-dimensional sphere-node generator.  Ignored in dimensions one
         and two.  Defaults to scrambled Sobol, which has substantially lower
         error and seed variance in the bundled convergence benchmark.
     antipodal : bool, optional
         Pair each higher-dimensional node with its negative.
+    circle_rule : {"auto", "cusp", "equispaced"}, optional
+        Direction rule in 2D.  ``"auto"``: for a ``DiscreteSampler`` with at
+        most 16 cusp lines (lines through the origin carrying atoms),
+        ``"cusp"``; with more, ``3 * number_of_sphere_points`` equally spaced
+        directions on the half circle; for other samplers, ``"equispaced"``.
+        ``"cusp"`` cuts the circle at the directions perpendicular to the
+        atoms, where the integrand has a cusp, and places graded
+        Gauss-Legendre panels on each arc; its size grows with the number of
+        cusp lines.  ``"equispaced"`` uses ``number_of_sphere_points``
+        equally spaced angles; for discrete measures it converges only like
+        ``m^-(1 + alpha)``.  Only ``"auto"`` is accepted outside 2D.
     random_state : None | int | np.random.Generator, optional
         Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
     exact : bool, optional
@@ -868,7 +1076,7 @@ class MultivariateStableDensity:
                  shift=0.0, number_of_spectral_samples=200_000,
                  number_of_sphere_points=None, random_state=None,
                  exact=False, projection_batch_size=1_000,
-                 sphere_method="sobol", antipodal=False):
+                 sphere_method="sobol", antipodal=False, circle_rule="auto"):
         if not 0.0 < alpha <= 2.0:
             raise ValueError(f"alpha must lie in (0, 2], got {alpha}")
         alpha = float(alpha)
@@ -894,9 +1102,11 @@ class MultivariateStableDensity:
             number_of_sphere_points = 360 if d == 2 else 4096
         self.number_of_sphere_points = int(number_of_sphere_points)
 
-        self.directions, self.weight = _sphere_directions(
-            d, self.number_of_sphere_points, random_state,
-            method=sphere_method, antipodal=antipodal)
+        self.circle_rule = circle_rule
+        self.directions, self.quad_weights = _quadrature_directions(
+            d, self.number_of_sphere_points, spectral_measure_sampler, alpha,
+            random_state, sphere_method=sphere_method, antipodal=antipodal,
+            circle_rule=circle_rule)
         if isinstance(spectral_measure_sampler, IsotropicSampler):
             self.sigma, self.beta, self.mu = _projection_parameters_isotropic(
                 self.directions, spectral_measure_sampler.gamma, alpha)
@@ -1010,7 +1220,7 @@ class MultivariateStableDensity:
             g = self._kernel_values(
                 v.ravel(), np.broadcast_to(beta_valid, v.shape).ravel()
             ).reshape(v.shape)
-            densities[lo:lo + rows] = self.weight * (g * scale).sum(axis=1)
+            densities[lo:lo + rows] = (g * scale) @ self.quad_weights[valid]
 
         np.maximum(densities, 0.0, out=densities)
         return densities[0] if single else densities
@@ -1028,6 +1238,7 @@ def get_pdf_model(
     exact: bool = False,
     sphere_method: str = "sobol",
     antipodal: bool = False,
+    circle_rule: str = "auto",
 ) -> MultivariateStableDensity:
     """Return a cached density model, constructing it on a cache miss."""
     key = (
@@ -1040,6 +1251,7 @@ def get_pdf_model(
         bool(exact),
         sphere_method,
         bool(antipodal),
+        str(circle_rule),
     )
     try:
         model = _pdf_model_cache.pop(key)
@@ -1054,6 +1266,7 @@ def get_pdf_model(
             exact=exact,
             sphere_method=sphere_method,
             antipodal=antipodal,
+            circle_rule=circle_rule,
         )
     _pdf_model_cache[key] = model
     if len(_pdf_model_cache) > _PDF_MODEL_CACHE_MAXSIZE:
@@ -1072,6 +1285,7 @@ def multivariate_alpha_stable_pdf(
     exact=False,
     sphere_method="sobol",
     antipodal=False,
+    circle_rule="auto",
 ):
     """Numerical multivariate alpha-stable density.
 
@@ -1101,6 +1315,12 @@ def multivariate_alpha_stable_pdf(
         Higher-dimensional sphere-node generator.
     antipodal : bool, optional
         Pair higher-dimensional sphere nodes with their negatives.
+    circle_rule : {"auto", "cusp", "equispaced"}, optional
+        Direction rule in 2D.  ``"auto"`` splits the circle at the cusps for
+        a ``DiscreteSampler`` with at most 16 cusp lines, uses equally spaced
+        directions for one with more, and equally spaced angles for other
+        samplers.  See ``MultivariateStableDensity``.  Only ``"auto"`` is
+        accepted outside 2D.
 
     Returns
     -------
@@ -1117,5 +1337,6 @@ def multivariate_alpha_stable_pdf(
         exact=exact,
         sphere_method=sphere_method,
         antipodal=antipodal,
+        circle_rule=circle_rule,
     )
     return model.pdf(x)
