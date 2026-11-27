@@ -853,29 +853,44 @@ def _projection_parameters_batched(directions, samples, alpha, mass,
     return sigma, beta, mu
 
 
-def _projection_parameters_discrete(directions, positions, weights, alpha):
-    """Exact projection parameters for a finite spectral measure."""
+def _projection_parameters_discrete(directions, positions, weights, alpha, *,
+                                    block_size=1_000_000):
+    """Exact projection parameters for a finite spectral measure.
+
+    Directions are processed in blocks of about ``block_size / n_atoms``
+    rows, so memory is ``O(m + block_size)`` instead of ``O(m * n_atoms)``.
+    Each direction's sums are computed whole within one block. Atoms with
+    zero weight or at the origin contribute nothing and are dropped.
+    """
     directions = np.asarray(directions, dtype=np.float64)
     positions = np.asarray(positions, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
-    proj = directions @ positions.T
-    abs_proj = np.abs(proj)
-    weighted_abs_alpha = abs_proj ** alpha * weights[None, :]
-    sigma_alpha = np.sum(weighted_abs_alpha, axis=1)
-    numerator = np.sum(np.sign(proj) * weighted_abs_alpha, axis=1)
+    norms = np.linalg.norm(positions, axis=1)
+    keep = (weights > 0.0) & (norms > 0.0)
+    positions, weights, norms = positions[keep], weights[keep], norms[keep]
+
+    m = directions.shape[0]
+    sigma_alpha = np.zeros(m)
+    numerator = np.zeros(m)
+    sum_mu = np.zeros(m) if alpha == 1.0 else None
+    rows = max(1, int(block_size) // max(positions.shape[0], 1))
+    for lo in range(0, m, rows):
+        proj = directions[lo:lo + rows] @ positions.T
+        abs_proj = np.abs(proj)
+        weighted_abs_alpha = abs_proj ** alpha * weights[None, :]
+        sigma_alpha[lo:lo + rows] = np.sum(weighted_abs_alpha, axis=1)
+        numerator[lo:lo + rows] = np.sum(np.sign(proj) * weighted_abs_alpha, axis=1)
+        if sum_mu is not None:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_unit = np.log(abs_proj / norms[None, :])
+            log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
+            sum_mu[lo:lo + rows] = np.sum(proj * log_unit * weights[None, :], axis=1)
+
     sigma = sigma_alpha ** (1.0 / alpha)
     beta = np.divide(numerator, sigma_alpha, out=np.zeros_like(numerator),
                      where=sigma_alpha > 0.0)
     beta = np.clip(beta, -1.0, 1.0)
-
-    mu = None
-    if alpha == 1.0:
-        position_norms = np.linalg.norm(positions, axis=1)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            log_unit = np.log(abs_proj / position_norms[None, :])
-        log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
-        mu = -(2.0 / np.pi) * np.sum(
-            proj * log_unit * weights[None, :], axis=1)
+    mu = None if sum_mu is None else -(2.0 / np.pi) * sum_mu
     return sigma, beta, mu
 
 
