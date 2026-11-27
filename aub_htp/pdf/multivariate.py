@@ -650,37 +650,50 @@ def _sphere_directions(d, number_of_points, random_state=None, *, method="mc",
     return points, weight
 
 
-def _cusp_breakpoints(positions, weights, merge_tol=1e-6):
-    """Cusp angles of ``sigma(s)^alpha`` in 2D, reduced modulo ``pi``.
+def _cusp_lines(positions, weights, alpha, merge_tol=1e-6):
+    """Cusp angles of ``sigma(s)^alpha`` in 2D (modulo ``pi``) and their strengths.
 
-    An atom ``p`` with angle ``phi`` contributes ``w |cos(theta - phi)|^alpha``
-    to ``sigma(theta)^alpha``, which is not smooth at ``phi +- pi/2``. Those two
-    angles differ by ``pi``, so modulo ``pi`` each atom line gives one angle.
-    Atoms with zero weight or at the origin are skipped. Angles whose
-    consecutive gaps (on the circle of length ``pi``) are below ``merge_tol``
-    are merged into their mean.
+    An atom ``p`` with weight ``w`` and angle ``phi`` contributes
+    ``w |p|^alpha |cos(theta - phi)|^alpha`` to ``sigma(theta)^alpha``. That
+    term has a cusp at ``phi + pi/2`` (mod ``pi``) whose size is the atom's
+    strength ``w |p|^alpha``. Atoms on the same line (``p`` and ``-p``
+    included) share one cusp, and their strengths add. Cusps whose
+    consecutive gaps, on the circle of length ``pi``, are below ``merge_tol``
+    are merged at their strength-weighted mean. Atoms with zero weight or at
+    the origin are skipped.
 
-    Returns sorted angles in ``[0, pi)``.
+    Returns ``(angles, strengths)`` with ``angles`` sorted in ``[0, pi)``.
     """
     positions = np.asarray(positions, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
-    keep = (weights > 0.0) & (np.linalg.norm(positions, axis=1) > 0.0)
+    norms = np.linalg.norm(positions, axis=1)
+    keep = (weights > 0.0) & (norms > 0.0)
     if not np.any(keep):
-        return np.empty(0)
-    psi = np.sort(np.mod(np.arctan2(positions[keep, 1], positions[keep, 0])
-                         + np.pi / 2, np.pi))
-    if psi.size == 1:
-        return psi
-    # Start after the largest gap so that no cluster straddles the wrap.
-    gaps = np.diff(np.append(psi, psi[0] + np.pi))
-    start = int(np.argmax(gaps)) + 1
-    psi = np.concatenate([psi[start:], psi[:start] + np.pi])
+        return np.empty(0), np.empty(0)
+    psi = np.mod(np.arctan2(positions[keep, 1], positions[keep, 0]) + np.pi / 2,
+                 np.pi)
+    strength = weights[keep] * norms[keep] ** alpha
+    order = np.argsort(psi)
+    psi, strength = psi[order], strength[order]
+    if psi.size > 1:
+        # Start after the largest gap so that no cluster straddles the wrap.
+        gaps = np.diff(np.append(psi, psi[0] + np.pi))
+        start = int(np.argmax(gaps)) + 1
+        psi = np.concatenate([psi[start:], psi[:start] + np.pi])
+        strength = np.concatenate([strength[start:], strength[:start]])
     groups = np.cumsum(np.concatenate([[True], np.diff(psi) > merge_tol])) - 1
-    merged = np.bincount(groups, weights=psi) / np.bincount(groups)
-    return np.sort(np.mod(merged, np.pi))
+    total = np.bincount(groups, weights=strength)
+    angles = np.mod(np.bincount(groups, weights=strength * psi) / total, np.pi)
+    order = np.argsort(angles)
+    return angles[order], total[order]
 
 
-def _cusp_split_directions(positions, weights, number_of_points, *,
+def _cusp_breakpoints(positions, weights, alpha, *, merge_tol=1e-6):
+    """Angles in ``[0, pi)`` at which the 2D rule cuts the circle, one per cusp line."""
+    return _cusp_lines(positions, weights, alpha, merge_tol)[0]
+
+
+def _cusp_split_directions(positions, weights, alpha, number_of_points, *,
                            levels=6, ratio=0.15, p_min=4, growth=2, p=12,
                            cusp_width=1e-5, merge_tol=1e-6):
     """Composite Gauss-Legendre rule on the circle for a discrete measure.
@@ -694,27 +707,29 @@ def _cusp_split_directions(positions, weights, number_of_points, *,
     ``g(-v, -beta) = g(v, beta)``. The integrand takes the same value at ``s``
     and ``-s``, so the rule covers ``[b_0, b_0 + pi)`` with doubled weights.
 
-    Arcs. The half circle is cut at the cusps of ``sigma(s)^alpha`` (see
+    Arcs. The half circle is cut at every cusp of ``sigma(s)^alpha`` (see
     ``_cusp_breakpoints``), so each arc has a cusp only at its two ends.
 
     Grading. On each half of an arc, panel edges shrink geometrically toward
     the cusp (``ratio**k`` of the half-arc) until the panel next to the cusp
-    is narrower than ``cusp_width``, with at most ``levels`` levels. Short
-    arcs (many atoms) get fewer levels.
+    is narrower than ``cusp_width``, with at most ``levels`` levels. A half-arc
+    already narrower than ``cusp_width`` is not graded.
 
     Width cap. Every panel is split into equal pieces no wider than
-    ``5 pi / number_of_points`` (2.5 degrees at 360). This resolves the
-    narrow kernel peak at the direction perpendicular to ``x``, which can lie
-    anywhere on an arc.
+    ``max_panel = 5 pi / number_of_points`` (2.5 degrees at 360). This
+    resolves the narrow kernel peak at the direction perpendicular to ``x``,
+    which can lie anywhere on an arc.
 
-    Points. Pieces of the ``k``-th panel from the cusp get
-    ``min(p_min + growth * k, p)`` Gauss-Legendre points, the rest get ``p``.
+    Points. Graded panels get ``min(p_min + growth * k, p)`` Gauss-Legendre
+    points (``k`` counted from the cusp), the other pieces ``p``. A half-arc
+    narrower than ``cusp_width`` is a single ``p_min``-point panel.
 
     ``number_of_points`` sets the spacing, not the number of directions. At
-    360, ``k`` evenly spaced atom lines give 944, 1072, 1360, 2000, 2560 and
-    5200 directions for ``k`` = 1, 2, 5, 10, 20 and 50.
+    360, ``k`` evenly spaced atom lines give 944, 1072, 1360, 1600, 2000 and
+    2048 directions for ``k`` = 1, 2, 5, 8, 10 and 16; in general at most
+    ``128 k + 12 pi / max_panel``.
     """
-    breaks = _cusp_breakpoints(positions, weights, merge_tol=merge_tol)
+    breaks = _cusp_breakpoints(positions, weights, alpha, merge_tol=merge_tol)
     if breaks.size == 0:
         raise ValueError("the spectral measure has no atom with positive weight")
     max_panel = 5.0 * np.pi / number_of_points
@@ -725,15 +740,21 @@ def _cusp_split_directions(positions, weights, number_of_points, *,
     for lo, hi in zip(ends[:-1], ends[1:]):
         half = 0.5 * (hi - lo)
         n_levels = int(np.clip(np.ceil(np.log(cusp_width / half) / np.log(ratio)),
-                               1, levels))
+                               0, levels))
         edges = half * np.concatenate(
             [[0.0], ratio ** np.arange(n_levels, 0, -1), [1.0]])
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
-            n_pts = min(p_min + growth * k, p) if k < n_levels else p
+            pieces = max(1, int(np.ceil((b - a) / max_panel - 1e-12)))
+            width = (b - a) / pieces
+            if k < n_levels:
+                n_pts = min(p_min + growth * k, p)
+            elif n_levels == 0:
+                n_pts = p_min            # the whole half-arc is narrower than cusp_width
+            else:
+                n_pts = p
             if n_pts not in rules:
                 rules[n_pts] = np.polynomial.legendre.leggauss(n_pts)
             xg, wg = rules[n_pts]
-            pieces = max(1, int(np.ceil((b - a) / max_panel - 1e-12)))
             cuts = np.linspace(a, b, pieces + 1)
             for c0, c1 in zip(cuts[:-1], cuts[1:]):
                 for x0, x1 in ((lo + c0, lo + c1), (hi - c1, hi - c0)):
@@ -748,8 +769,21 @@ def _cusp_split_directions(positions, weights, number_of_points, *,
 
 _CIRCLE_RULES = ("auto", "cusp", "equispaced")
 
+_AUTO_MAX_CUSP_LINES = 16
+_FALLBACK_FACTOR = 3
 
-def _quadrature_directions(d, number_of_points, spectral_measure_sampler,
+
+def _half_circle_equispaced(m):
+    """``m`` equally spaced directions on ``[0, pi)`` with weights ``2 pi / m``.
+
+    The integrand takes the same value at ``s`` and ``-s``, so this gives
+    the same result as ``2 m`` equally spaced directions on the full circle.
+    """
+    phi = np.pi * np.arange(m) / m
+    return np.column_stack([np.cos(phi), np.sin(phi)]), np.full(m, 2.0 * np.pi / m)
+
+
+def _quadrature_directions(d, number_of_points, spectral_measure_sampler, alpha,
                            random_state=None, *, sphere_method="sobol",
                            antipodal=False, circle_rule="auto"):
     """Sphere quadrature nodes and one weight per node.
@@ -758,27 +792,35 @@ def _quadrature_directions(d, number_of_points, spectral_measure_sampler,
 
     In 2D, ``circle_rule`` selects the rule:
 
-    - ``"auto"``: ``"cusp"`` for a ``DiscreteSampler``, ``"equispaced"``
-      otherwise.
-    - ``"cusp"``: ``_cusp_split_directions``. Needs a ``DiscreteSampler``,
-      since the cusps are at the directions perpendicular to its atoms.
+    - ``"auto"``: for a ``DiscreteSampler``, ``"cusp"`` if it has at most 16
+      cusp lines, otherwise ``3 * number_of_points`` equally spaced directions
+      on the half circle (the same result as ``6 * number_of_points`` on the
+      full circle). ``"equispaced"`` for other samplers.
+    - ``"cusp"``: ``_cusp_split_directions``, cutting at every cusp line.
     - ``"equispaced"``: equally spaced angles with equal weights.
 
-    In other dimensions ``circle_rule`` must be ``"auto"`` or
-    ``"equispaced"``, and the nodes come from ``_sphere_directions``.
+    Outside 2D only ``"auto"`` is accepted, and the nodes come from
+    ``_sphere_directions``.
     """
     if circle_rule not in _CIRCLE_RULES:
         raise ValueError(
             f"circle_rule must be one of {_CIRCLE_RULES}, got {circle_rule!r}")
-    discrete = isinstance(spectral_measure_sampler, DiscreteSampler)
-    if circle_rule == "cusp" and (d != 2 or not discrete):
+    if d != 2 and circle_rule != "auto":
         raise ValueError(
-            "circle_rule='cusp' needs a 2-dimensional DiscreteSampler")
+            f"circle_rule={circle_rule!r} only applies in 2D; the measure is "
+            f"{d}-dimensional, so use circle_rule='auto'")
+    discrete = isinstance(spectral_measure_sampler, DiscreteSampler)
+    if circle_rule == "cusp" and not discrete:
+        raise ValueError("circle_rule='cusp' needs a DiscreteSampler")
 
-    if d == 2 and discrete and circle_rule in ("auto", "cusp"):
-        return _cusp_split_directions(spectral_measure_sampler.positions,
-                                      spectral_measure_sampler.weights,
-                                      number_of_points)
+    if d == 2 and discrete and circle_rule != "equispaced":
+        positions = spectral_measure_sampler.positions
+        weights = spectral_measure_sampler.weights
+        if (circle_rule == "auto"
+                and _cusp_lines(positions, weights, alpha)[0].size > _AUTO_MAX_CUSP_LINES):
+            return _half_circle_equispaced(_FALLBACK_FACTOR * number_of_points)
+        return _cusp_split_directions(positions, weights, alpha, number_of_points)
+    
     points, weight = _sphere_directions(d, number_of_points, random_state,
                                         method=sphere_method,
                                         antipodal=antipodal)
@@ -1000,7 +1042,10 @@ class MultivariateStableDensity:
         the 2D cusp rule (see ``circle_rule``) it sets the largest panel
         width, ``5 pi / number_of_sphere_points``, rather than the number of
         directions; ``directions.shape[0]`` gives the actual count (1072 for
-        4 atoms on 2 lines at the default).
+        4 atoms on 2 lines at the default).  For small ``alpha`` and points
+        far out relative to the projection scale, raise it: at
+        ``alpha = 0.5`` and ``|x|`` about ``7 sigma``, 360 gives about 1e-3
+        and 720 about 1e-6.
     sphere_method : {"mc", "sobol"}, optional
         Higher-dimensional sphere-node generator.  Ignored in dimensions one
         and two.  Defaults to scrambled Sobol, which has substantially lower
@@ -1008,12 +1053,16 @@ class MultivariateStableDensity:
     antipodal : bool, optional
         Pair each higher-dimensional node with its negative.
     circle_rule : {"auto", "cusp", "equispaced"}, optional
-        Direction rule in 2D.  ``"auto"`` uses ``"cusp"`` for a
-        ``DiscreteSampler`` and ``"equispaced"`` otherwise.  ``"cusp"`` cuts
-        the circle at the directions perpendicular to the atoms, where the
-        integrand has a cusp, and places graded Gauss-Legendre panels on each
-        arc.  ``"equispaced"`` uses equally spaced angles; for discrete
-        measures it converges only like ``m^-(1 + alpha)``.
+        Direction rule in 2D.  ``"auto"``: for a ``DiscreteSampler`` with at
+        most 16 cusp lines (lines through the origin carrying atoms),
+        ``"cusp"``; with more, ``3 * number_of_sphere_points`` equally spaced
+        directions on the half circle; for other samplers, ``"equispaced"``.
+        ``"cusp"`` cuts the circle at the directions perpendicular to the
+        atoms, where the integrand has a cusp, and places graded
+        Gauss-Legendre panels on each arc; its size grows with the number of
+        cusp lines.  ``"equispaced"`` uses ``number_of_sphere_points``
+        equally spaced angles; for discrete measures it converges only like
+        ``m^-(1 + alpha)``.  Only ``"auto"`` is accepted outside 2D.
     random_state : None | int | np.random.Generator, optional
         Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
     exact : bool, optional
@@ -1056,7 +1105,7 @@ class MultivariateStableDensity:
 
         self.circle_rule = circle_rule
         self.directions, self.quad_weights = _quadrature_directions(
-            d, self.number_of_sphere_points, spectral_measure_sampler,
+            d, self.number_of_sphere_points, spectral_measure_sampler, alpha,
             random_state, sphere_method=sphere_method, antipodal=antipodal,
             circle_rule=circle_rule)
         if isinstance(spectral_measure_sampler, IsotropicSampler):
@@ -1269,7 +1318,8 @@ def multivariate_alpha_stable_pdf(
         Pair higher-dimensional sphere nodes with their negatives.
     circle_rule : {"auto", "cusp", "equispaced"}, optional
         Direction rule in 2D.  ``"auto"`` splits the circle at the cusps for
-        a ``DiscreteSampler`` and uses equally spaced angles otherwise.
+        a ``DiscreteSampler`` and uses equally spaced angles otherwise. 
+        Only ``"auto"`` is accepted outside 2D.
 
     Returns
     -------
