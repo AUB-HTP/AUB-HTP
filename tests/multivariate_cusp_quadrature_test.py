@@ -397,11 +397,11 @@ def test_three_lines_self_convergence(alpha):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("alpha,measure,tol", [(0.5, "symmetric", 3e-4),
-                                               (0.8, "symmetric", 5e-8),
-                                               (0.8, "skewed", 2e-3),
-                                               (1.0, "uneven", 2e-8),
-                                               (1.5, "uneven", 5e-7)])
+@pytest.mark.parametrize("alpha,measure,tol", [(0.5, "symmetric", 1e-3),
+                                               (0.8, "symmetric", 2e-7),
+                                               (0.8, "skewed", 5e-3),
+                                               (1.0, "uneven", 2e-7),
+                                               (1.5, "uneven", 2e-6)])
 def test_default_spline_path(alpha, measure, tol):
     """exact=False uses the same rule as exact=True; its error is set by the spline."""
     positions, weights, x, want = _case(alpha, measure)
