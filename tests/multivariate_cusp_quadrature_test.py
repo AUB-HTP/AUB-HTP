@@ -1,15 +1,19 @@
 """Cusp-split quadrature on the circle for 2D discrete spectral measures."""
+import tracemalloc
 from math import gamma, pi
 
 import numpy as np
 import pytest
 from scipy.integrate import quad
 
+from aub_htp import multivariate_alpha_stable
 from aub_htp.pdf.multivariate import (
     MultivariateStableDensity,
     _cusp_breakpoints,
     _cusp_split_directions,
+    _projection_parameters_discrete,
     g_alpha_d,
+    get_pdf_model,
 )
 from aub_htp.random.spectral_measure_sampler import DiscreteSampler, IsotropicSampler
 
@@ -103,37 +107,50 @@ def uneven_reference(y, alpha, betas):
     return reference(y, alpha, betas) / (SCALES.prod() * abs(np.linalg.det(B)))
 
 
-# --- the rule itself (fast) ------------------------------------------------ #
+def _lines(n, offset=0.0):
+    angles = offset + pi * np.arange(n) / n
+    return angles, np.column_stack([np.cos(angles), np.sin(angles)])
+
+
+# --- breakpoints (fast) ---------------------------------------------------- #
 def test_breakpoints_are_perpendicular_to_atoms():
-    breaks = np.degrees(_cusp_breakpoints(POSITIONS, np.full(4, 0.5)))
+    breaks = np.degrees(_cusp_breakpoints(POSITIONS, np.full(4, 0.5), 0.5))
     np.testing.assert_allclose(breaks, [30.0, 120.0], atol=1e-12)
 
 
 def test_breakpoints_skip_zero_weight_and_origin_atoms():
     positions = np.vstack([POSITIONS, [[0.0, 0.0], [1.0, 1.0]]])
     weights = np.array([0.5, 0.5, 0.5, 0.5, 1.0, 0.0])
-    assert _cusp_breakpoints(positions, weights).size == 2
+    assert _cusp_breakpoints(positions, weights, 0.5).size == 2
 
 
 def test_near_coincident_cusps_are_merged():
     a = 0.3
     near = np.array([_unit(np.degrees(a)), _unit(np.degrees(a + 1e-8))])
     far = np.array([_unit(np.degrees(a)), _unit(np.degrees(a + 1e-3))])
-    assert _cusp_breakpoints(near, [1.0, 1.0]).size == 1
-    assert _cusp_breakpoints(far, [1.0, 1.0]).size == 2
+    assert _cusp_breakpoints(near, [1.0, 1.0], 0.8).size == 1
+    assert _cusp_breakpoints(far, [1.0, 1.0], 0.8).size == 2
+
+
+def test_merged_cusp_sits_at_strength_weighted_mean():
+    a = 0.3
+    positions = np.array([_unit(np.degrees(a)), _unit(np.degrees(a + 1e-8))])
+    breaks = _cusp_breakpoints(positions, [3.0, 1.0], 0.8)
+    np.testing.assert_allclose(breaks, [np.mod(a + pi / 2, pi) + 0.25e-8], atol=1e-13)
 
 
 def test_merging_wraps_around():
     eps = 1e-8                         # cusps at eps and pi - eps (mod pi)
     positions = np.array([[np.cos(-pi / 2 + eps), np.sin(-pi / 2 + eps)],
                           [np.cos(pi / 2 - eps), np.sin(pi / 2 - eps)]])
-    breaks = _cusp_breakpoints(positions, [1.0, 1.0])
+    breaks = _cusp_breakpoints(positions, [1.0, 1.0], 0.8)
     assert breaks.size == 1
     assert min(breaks[0], pi - breaks[0]) < 1e-7
 
 
+# --- the rule (fast) ------------------------------------------------------- #
 def test_rule_size_and_total_weight():
-    points, q = _cusp_split_directions(POSITIONS, np.full(4, 0.5), 360)
+    points, q = _cusp_split_directions(POSITIONS, np.full(4, 0.5), 0.5, 360)
     assert points.shape == (1072, 2)
     np.testing.assert_allclose(np.linalg.norm(points, axis=1), 1.0, atol=1e-14)
     assert q.min() > 0
@@ -141,13 +158,30 @@ def test_rule_size_and_total_weight():
 
 
 @pytest.mark.parametrize("lines,expected", [(1, 944), (2, 1072), (5, 1360),
-                                            (10, 2000), (20, 2560), (50, 5200)])
+                                            (8, 1600), (10, 2000), (16, 2048)])
 def test_rule_size_for_evenly_spaced_lines(lines, expected):
-    angles = pi * np.arange(lines) / lines
-    positions = np.column_stack([np.cos(angles), np.sin(angles)])
-    points, q = _cusp_split_directions(positions, np.ones(lines), 360)
+    _, positions = _lines(lines)
+    points, q = _cusp_split_directions(positions, np.ones(lines), 0.8, 360)
     assert points.shape[0] == expected
     assert q.sum() == pytest.approx(2 * pi, abs=1e-10)
+
+
+def test_rule_size_is_bounded_up_to_16_lines():
+    """Each arc has at most 128 + 12 * length / max_panel points."""
+    rng = np.random.default_rng(0)
+    a = rng.uniform(0.0, pi, 16)
+    positions = np.column_stack([np.cos(a), np.sin(a)]) * rng.uniform(0.5, 2.0, 16)[:, None]
+    points, q = _cusp_split_directions(positions, rng.uniform(0.1, 1.0, 16), 0.7, 360)
+    assert points.shape[0] <= 128 * 16 + 12 * 72
+    assert q.sum() == pytest.approx(2 * pi, abs=1e-10)
+
+
+def test_short_arcs_are_cheap():
+    """Two lines 1e-5 rad apart: the short arc gets one 4-point panel per side."""
+    positions = np.array([_unit(0.0), _unit(np.degrees(1e-5))])
+    full, _ = _cusp_split_directions(positions[:1], [1.0], 0.8, 360)
+    both, _ = _cusp_split_directions(positions, [1.0, 1.0], 0.8, 360)
+    assert both.shape[0] - full.shape[0] <= 8
 
 
 @pytest.mark.parametrize("alpha", [0.5, 0.8, 1.5])
@@ -155,7 +189,7 @@ def test_cusp_integrand_is_integrated_accurately(alpha):
     """int |cos(theta - phi)|^alpha over the circle, phi off the 1-degree grid."""
     phi = 0.3
     exact = 2 * np.sqrt(pi) * gamma((alpha + 1) / 2) / gamma(alpha / 2 + 1)
-    points, q = _cusp_split_directions([[np.cos(phi), np.sin(phi)]], [1.0], 360)
+    points, q = _cusp_split_directions([[np.cos(phi), np.sin(phi)]], [1.0], alpha, 360)
     theta = np.arctan2(points[:, 1], points[:, 0])
     got = q @ np.abs(np.cos(theta - phi)) ** alpha
     e = np.linspace(0, 2 * pi, 360, endpoint=False)
@@ -183,13 +217,93 @@ def test_integrand_is_even_on_the_circle(alpha, positions, weights):
     np.testing.assert_allclose(f[:, :8], f[:, 8:], rtol=1e-8, atol=1e-14)
 
 
-# --- rule selection (fast) ------------------------------------------------- #
+# --- projection parameters (fast) ------------------------------------------ #
+def _projection_unbatched(directions, positions, weights, alpha):
+    """The previous implementation: one (directions x atoms) matrix."""
+    proj = directions @ positions.T
+    abs_proj = np.abs(proj)
+    wa = abs_proj ** alpha * weights[None, :]
+    sigma_alpha = wa.sum(axis=1)
+    beta = np.clip(np.divide((np.sign(proj) * wa).sum(axis=1), sigma_alpha,
+                             out=np.zeros(len(directions)), where=sigma_alpha > 0), -1, 1)
+    mu = None
+    if alpha == 1.0:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            log_unit = np.log(abs_proj / np.linalg.norm(positions, axis=1)[None, :])
+        log_unit = np.nan_to_num(log_unit, nan=0.0, posinf=0.0, neginf=0.0)
+        mu = -(2.0 / pi) * (proj * log_unit * weights[None, :]).sum(axis=1)
+    return sigma_alpha ** (1.0 / alpha), beta, mu
+
+
+@pytest.mark.parametrize("alpha", [0.8, 1.0, 1.5])
+def test_batched_projection_matches_unbatched(alpha):
+    positions = np.vstack([TRIANGLE, [[0.0, 0.0], [1.0, 1.0]]])
+    weights = np.array([1.0, 1.0, 1.0, 1.0, 0.0])
+    a = np.linspace(0.0, 2 * pi, 101, endpoint=False)
+    directions = np.column_stack([np.cos(a), np.sin(a)])
+    want = _projection_unbatched(directions, positions, weights, alpha)
+    for block_size in (7, 1_000_000):
+        got = _projection_parameters_discrete(directions, positions, weights, alpha,
+                                              block_size=block_size)
+        for g, w in zip(got, want):
+            if w is None:
+                assert g is None
+            else:
+                np.testing.assert_allclose(g, w, rtol=1e-13, atol=1e-15)
+
+
+def test_projection_memory_is_bounded():
+    rng = np.random.default_rng(1)
+    n, m = 5000, 2000
+    positions = rng.normal(size=(n, 2))
+    weights = rng.uniform(size=n)
+    a = rng.uniform(0.0, 2 * pi, m)
+    directions = np.column_stack([np.cos(a), np.sin(a)])
+    tracemalloc.start()
+    _projection_parameters_discrete(directions, positions, weights, 0.8)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert peak < 100e6          # one unbatched (m x n) float array alone is 80 MB
+
+
+# --- rule selection and API (fast) ----------------------------------------- #
 def test_auto_uses_cusp_rule_for_discrete_2d():
     sampler = DiscreteSampler(0.5, POSITIONS, np.full(4, 0.5))
     assert MultivariateStableDensity(0.5, sampler).directions.shape[0] == 1072
     equi = MultivariateStableDensity(0.5, sampler, circle_rule="equispaced")
     assert equi.directions.shape[0] == 360
     np.testing.assert_allclose(equi.quad_weights, 2 * pi / 360)
+
+
+def test_auto_falls_back_to_equispaced_above_16_lines():
+    for lines, expected in ((16, 2048), (17, 1080)):
+        _, p = _lines(lines)
+        sampler = DiscreteSampler(0.8, np.vstack([p, -p]), np.ones(2 * lines))
+        model = MultivariateStableDensity(0.8, sampler, exact=True)
+        assert model.directions.shape[0] == expected
+        assert model.quad_weights.sum() == pytest.approx(2 * pi, abs=1e-10)
+    cusp = MultivariateStableDensity(0.8, sampler, exact=True, circle_rule="cusp")
+    assert cusp.directions.shape[0] > 1080            # explicit "cusp" cuts every line
+
+
+def test_auto_size_does_not_grow_with_atoms():
+    rng = np.random.default_rng(0)
+    a = rng.uniform(0.0, pi, 2000)
+    p = np.column_stack([np.cos(a), np.sin(a)])
+    sampler = DiscreteSampler(0.8, np.vstack([p, -p]), np.ones(4000))
+    assert MultivariateStableDensity(0.8, sampler, exact=True).directions.shape[0] == 1080
+
+
+@pytest.mark.parametrize("alpha", [1.0, 1.5])
+def test_fallback_equals_full_circle_equispaced(alpha):
+    """1080 directions on the half circle == 2160 on the full circle."""
+    _, p = _lines(17, offset=0.1)
+    sampler = DiscreteSampler(alpha, np.vstack([p, -p]), np.ones(34))
+    x = np.array([[0.5, -0.3], [2.0, 1.0], [-1.0, 3.0]])
+    half = MultivariateStableDensity(alpha, sampler, exact=True).pdf(x)
+    full = MultivariateStableDensity(alpha, sampler, exact=True, circle_rule="equispaced",
+                                     number_of_sphere_points=2160).pdf(x)
+    np.testing.assert_allclose(half, full, rtol=1e-10)
 
 
 def test_auto_keeps_equispaced_for_other_samplers():
@@ -205,21 +319,46 @@ def test_invalid_circle_rule_is_rejected():
         MultivariateStableDensity(1.5, IsotropicSampler(2, 1.5, 1.0), circle_rule="cusp")
 
 
-# --- accuracy against exact densities (slow, exact kernel) ----------------- #
+@pytest.mark.parametrize("rule", ["cusp", "equispaced"])
+def test_circle_rule_is_rejected_outside_2d(rule):
+    with pytest.raises(ValueError):
+        MultivariateStableDensity(1.5, IsotropicSampler(3, 1.5, 1.0), circle_rule=rule)
+
+
+def test_public_pdf_passes_circle_rule():
+    positions, weights = uneven_measure(1.5, (0.0, 0.0))
+    sampler = DiscreteSampler(1.5, positions, weights)
+    _, x = uneven_grid(3)
+    for rule in ("auto", "equispaced"):
+        got = multivariate_alpha_stable.pdf(x, 1.5, sampler, circle_rule=rule)
+        want = MultivariateStableDensity(1.5, sampler, circle_rule=rule).pdf(x)
+        np.testing.assert_allclose(got, want, rtol=1e-14)
+    assert get_pdf_model(1.5, sampler, circle_rule="equispaced").directions.shape[0] == 360
+
+
+# --- accuracy against exact densities (slow) ------------------------------- #
 def _errors(got, want):
     bulk = want >= 0.01 * want.max()
     rel = np.abs(got - want) / want
     return rel[bulk].max(), rel.max()
 
 
+def _case(alpha, measure):
+    if measure == "uneven":
+        positions, weights = uneven_measure(alpha, (0.0, 0.0))
+        y, x = uneven_grid()
+        return positions, weights, x, uneven_reference(y, alpha, (0.0, 0.0))
+    weights, betas = MEASURES[measure]
+    z, x = grid()
+    return POSITIONS, weights, x, reference(z, alpha, betas)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("alpha,measure", [(0.5, "symmetric"), (0.8, "symmetric"),
                                            (0.5, "skewed"), (0.8, "skewed")])
 def test_density_matches_reference(alpha, measure):
-    weights, betas = MEASURES[measure]
-    z, x = grid()
-    want = reference(z, alpha, betas)
-    got = MultivariateStableDensity(alpha, DiscreteSampler(alpha, POSITIONS, weights),
+    positions, weights, x, want = _case(alpha, measure)
+    got = MultivariateStableDensity(alpha, DiscreteSampler(alpha, positions, weights),
                                     exact=True).pdf(x)
     bulk, worst = _errors(got, want)
     print(f"\nalpha={alpha} {measure}: bulk {bulk:.1e}, all {worst:.1e}")
@@ -255,6 +394,25 @@ def test_three_lines_self_convergence(alpha):
     bulk, worst = _errors(coarse, fine)
     print(f"\ntriangle alpha={alpha}: bulk {bulk:.1e}, all {worst:.1e}")
     assert bulk < 1e-12
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("alpha,measure,tol", [(0.5, "symmetric", 3e-4),
+                                               (0.8, "symmetric", 5e-8),
+                                               (0.8, "skewed", 2e-3),
+                                               (1.0, "uneven", 2e-8),
+                                               (1.5, "uneven", 5e-7)])
+def test_default_spline_path(alpha, measure, tol):
+    """exact=False uses the same rule as exact=True; its error is set by the spline."""
+    positions, weights, x, want = _case(alpha, measure)
+    sampler = DiscreteSampler(alpha, positions, weights)
+    spline = MultivariateStableDensity(alpha, sampler)                 # exact=False
+    exact = MultivariateStableDensity(alpha, sampler, exact=True)
+    np.testing.assert_array_equal(spline.directions, exact.directions)
+    np.testing.assert_array_equal(spline.quad_weights, exact.quad_weights)
+    bulk, worst = _errors(spline.pdf(x), want)
+    print(f"\nexact=False alpha={alpha} {measure}: bulk {bulk:.1e}, all {worst:.1e}")
+    assert bulk < tol
 
 
 @pytest.mark.slow
