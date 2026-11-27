@@ -238,8 +238,8 @@ def test_uneven_atoms_match_reference(alpha, betas):
                                     exact=True).pdf(x)
     bulk, worst = _errors(got, want)
     print(f"\nuneven alpha={alpha} betas={betas}: bulk {bulk:.1e}, all {worst:.1e}")
-    assert bulk < 1e-6
-    assert worst < 1e-3
+    assert bulk < 2e-8
+    assert worst < 2e-8
 
 
 @pytest.mark.slow
@@ -254,7 +254,7 @@ def test_three_lines_self_convergence(alpha):
                                      number_of_sphere_points=1440).pdf(x)
     bulk, worst = _errors(coarse, fine)
     print(f"\ntriangle alpha={alpha}: bulk {bulk:.1e}, all {worst:.1e}")
-    assert bulk < 1e-6
+    assert bulk < 1e-12
 
 
 @pytest.mark.slow
