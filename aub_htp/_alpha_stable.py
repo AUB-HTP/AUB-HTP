@@ -319,6 +319,38 @@ class multivariate_alpha_stable_gen(multi_rv_generic):
         The method reuses the last computed internal density model when the
         pdf parameters are identical to the previous call. This preserves the
         costly `MultivariateStableDensity` setup for repeated evaluations.
+
+        Parameters
+        ----------
+        x : array_like
+            Point(s) of shape ``(d,)`` or ``(n, d)``.
+        alpha : float
+            Stability index in ``(0, 2)``.
+        spectral_measure_sampler : BaseSpectralMeasureSampler or str
+            The spectral measure, or the name of a built-in one.
+        shift : array_like, optional
+            Location vector.
+        number_of_spectral_samples : int, optional
+            Monte-Carlo samples used to estimate the projection parameters.
+        number_of_sphere_points : int, optional
+            Sphere quadrature size. See ``MultivariateStableDensity``.
+        random_state : None | int | np.random.RandomState | np.random.Generator, optional
+            Seeds the spectral samples and, for ``d > 2``, the sphere nodes.
+        exact : bool, optional
+            Bypass the kernel spline and evaluate the kernel directly.
+        sphere_method : {"mc", "sobol"}, optional
+            Higher-dimensional sphere-node generator.
+        antipodal : bool, optional
+            Pair higher-dimensional sphere nodes with their negatives.
+        circle_rule : {"auto", "cusp", "equispaced"}, optional
+            Direction rule in 2D. ``"auto"`` splits the circle at the cusps
+            for a ``DiscreteSampler`` and uses equally spaced angles otherwise.
+            Only ``"auto"`` is accepted outside 2D.
+
+        Returns
+        -------
+        density : float or np.ndarray
+            Scalar for a single point, otherwise shape ``(n,)``.
         """
         sampler = self._check_spectral_measure_sampler(
             alpha, spectral_measure_sampler)
