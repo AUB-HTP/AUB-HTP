@@ -650,66 +650,86 @@ def _sphere_directions(d, number_of_points, random_state=None, *, method="mc",
     return points, weight
 
 
-def _cusp_breakpoints(positions, weights):
-    """Angles in ``[0, 2 pi)`` where ``sigma(s)^alpha`` has a cusp in 2D.
+def _cusp_breakpoints(positions, weights, merge_tol=1e-6):
+    """Cusp angles of ``sigma(s)^alpha`` in 2D, reduced modulo ``pi``.
 
     An atom ``p`` with angle ``phi`` contributes ``w |cos(theta - phi)|^alpha``
-    to ``sigma(theta)^alpha``. That term is not smooth at ``phi +- pi/2``, the
-    two directions perpendicular to ``p``. Atoms with zero weight or at the
-    origin contribute nothing and are skipped. ``p`` and ``-p`` give the same
-    two angles, so duplicates are removed.
+    to ``sigma(theta)^alpha``, which is not smooth at ``phi +- pi/2``. Those two
+    angles differ by ``pi``, so modulo ``pi`` each atom line gives one angle.
+    Atoms with zero weight or at the origin are skipped. Angles whose
+    consecutive gaps (on the circle of length ``pi``) are below ``merge_tol``
+    are merged into their mean.
+
+    Returns sorted angles in ``[0, pi)``.
     """
     positions = np.asarray(positions, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
     keep = (weights > 0.0) & (np.linalg.norm(positions, axis=1) > 0.0)
     if not np.any(keep):
         return np.empty(0)
-    phi = np.arctan2(positions[keep, 1], positions[keep, 0])
-    breaks = np.sort(np.mod(np.concatenate([phi + np.pi / 2, phi - np.pi / 2]),
-                            2.0 * np.pi))
-    breaks = breaks[np.concatenate([[True], np.diff(breaks) > 1e-12])]
-    if breaks.size > 1 and 2.0 * np.pi - breaks[-1] + breaks[0] < 1e-12:
-        breaks = breaks[:-1]
-    return breaks
+    psi = np.sort(np.mod(np.arctan2(positions[keep, 1], positions[keep, 0])
+                         + np.pi / 2, np.pi))
+    if psi.size == 1:
+        return psi
+    # Start after the largest gap so that no cluster straddles the wrap.
+    gaps = np.diff(np.append(psi, psi[0] + np.pi))
+    start = int(np.argmax(gaps)) + 1
+    psi = np.concatenate([psi[start:], psi[:start] + np.pi])
+    groups = np.cumsum(np.concatenate([[True], np.diff(psi) > merge_tol])) - 1
+    merged = np.bincount(groups, weights=psi) / np.bincount(groups)
+    return np.sort(np.mod(merged, np.pi))
 
 
 def _cusp_split_directions(positions, weights, number_of_points, *,
-                           levels=6, ratio=0.15, p_min=4, growth=2, p=12):
+                           levels=6, ratio=0.15, p_min=4, growth=2, p=12,
+                           cusp_width=1e-5, merge_tol=1e-6):
     """Composite Gauss-Legendre rule on the circle for a discrete measure.
 
     Returns ``(points, weights)`` with ``points`` of shape ``(m, 2)`` and
-    ``int_{S^1} f ds ~= sum_j weights[j] f(points[j])``.
+    ``int_{S^1} f ds ~= sum_j weights[j] f(points[j])`` for the density
+    integrand ``f``.
 
-    The circle is cut at the cusps of ``sigma(s)^alpha`` (see
-    ``_cusp_breakpoints``), so each arc has a cusp only at its two ends. On
-    each half of an arc, panel edges shrink geometrically toward the cusp
-    (``ratio**k`` of the half-arc, ``k = 1..levels``). Every panel is then
-    split into equal pieces no wider than ``5 pi / number_of_points``
-    (2.5 degrees at 360). Pieces of the ``k``-th panel from the cusp get
+    Half circle. ``sigma(-s) = sigma(s)``, ``beta(-s) = -beta(s)``,
+    ``mu(-s) = -mu(s)`` and ``<x, -s> = -<x, s>``, so ``v(-s) = -v(s)``, and
+    ``g(-v, -beta) = g(v, beta)``. The integrand takes the same value at ``s``
+    and ``-s``, so the rule covers ``[b_0, b_0 + pi)`` with doubled weights.
+
+    Arcs. The half circle is cut at the cusps of ``sigma(s)^alpha`` (see
+    ``_cusp_breakpoints``), so each arc has a cusp only at its two ends.
+
+    Grading. On each half of an arc, panel edges shrink geometrically toward
+    the cusp (``ratio**k`` of the half-arc) until the panel next to the cusp
+    is narrower than ``cusp_width``, with at most ``levels`` levels. Short
+    arcs (many atoms) get fewer levels.
+
+    Width cap. Every panel is split into equal pieces no wider than
+    ``5 pi / number_of_points`` (2.5 degrees at 360). This resolves the
+    narrow kernel peak at the direction perpendicular to ``x``, which can lie
+    anywhere on an arc.
+
+    Points. Pieces of the ``k``-th panel from the cusp get
     ``min(p_min + growth * k, p)`` Gauss-Legendre points, the rest get ``p``.
 
-    The grading handles the cusps. The width cap handles the narrow kernel
-    peak at the direction perpendicular to ``x``, which can sit anywhere on an
-    arc, including next to a cusp. ``number_of_points`` therefore sets the
-    spacing, not the number of directions: with 4 atoms on 2 lines and
-    ``number_of_points = 360`` the rule has 2144 directions.
+    ``number_of_points`` sets the spacing, not the number of directions. At
+    360, ``k`` evenly spaced atom lines give 944, 1072, 1360, 2000, 2560 and
+    5200 directions for ``k`` = 1, 2, 5, 10, 20 and 50.
     """
-    breaks = _cusp_breakpoints(positions, weights)
+    breaks = _cusp_breakpoints(positions, weights, merge_tol=merge_tol)
     if breaks.size == 0:
         raise ValueError("the spectral measure has no atom with positive weight")
     max_panel = 5.0 * np.pi / number_of_points
-    ends = np.append(breaks, breaks[0] + 2.0 * np.pi)
-
-    # Panel edges measured from the cusp, as fractions of the half-arc.
-    fractions = np.concatenate([[0.0], ratio ** np.arange(levels, 0, -1), [1.0]])
+    ends = np.append(breaks, breaks[0] + np.pi)
     rules = {}
 
     angles, quad = [], []
     for lo, hi in zip(ends[:-1], ends[1:]):
         half = 0.5 * (hi - lo)
-        edges = half * fractions
+        n_levels = int(np.clip(np.ceil(np.log(cusp_width / half) / np.log(ratio)),
+                               1, levels))
+        edges = half * np.concatenate(
+            [[0.0], ratio ** np.arange(n_levels, 0, -1), [1.0]])
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:])):
-            n_pts = min(p_min + growth * k, p) if k < levels else p
+            n_pts = min(p_min + growth * k, p) if k < n_levels else p
             if n_pts not in rules:
                 rules[n_pts] = np.polynomial.legendre.leggauss(n_pts)
             xg, wg = rules[n_pts]
@@ -720,7 +740,7 @@ def _cusp_split_directions(positions, weights, number_of_points, *,
                     angles.append(0.5 * (x0 + x1) + 0.5 * (x1 - x0) * xg)
                     quad.append(0.5 * (x1 - x0) * wg)
     angles = np.concatenate(angles)
-    quad = np.concatenate(quad)
+    quad = 2.0 * np.concatenate(quad)        # s and -s contribute equally
     order = np.argsort(np.mod(angles, 2.0 * np.pi))
     angles, quad = angles[order], quad[order]
     return np.column_stack([np.cos(angles), np.sin(angles)]), quad
@@ -964,7 +984,7 @@ class MultivariateStableDensity:
         otherwise (a power of two preserves Sobol balance properties).  For
         the 2D cusp rule (see ``circle_rule``) it sets the largest panel
         width, ``5 pi / number_of_sphere_points``, rather than the number of
-        directions; ``directions.shape[0]`` gives the actual count (2144 for
+        directions; ``directions.shape[0]`` gives the actual count (1072 for
         4 atoms on 2 lines at the default).
     sphere_method : {"mc", "sobol"}, optional
         Higher-dimensional sphere-node generator.  Ignored in dimensions one
