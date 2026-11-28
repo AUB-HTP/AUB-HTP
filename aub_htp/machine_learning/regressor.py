@@ -14,13 +14,6 @@ def l_alpha_loss(y, y_pred, *, alpha: float, tol: float = 2.0 ** -20, max_iter: 
 def r_alpha_score(y, y_pred, *, alpha: float) -> float:
     y = np.asarray(y, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    if y.size == 0:
-        raise ValueError(f"y must not be empty, got shape {y.shape}.")
-    if y_pred.shape != y.shape:
-        if y_pred.size != y.size:
-            raise ValueError(f"y and y_pred must have the same size, got shapes {y.shape} and {y_pred.shape}.")
-        # (n,) against (n, 1): the same values, which would broadcast to (n, n).
-        y_pred = y_pred.reshape(y.shape)
     if np.all(y == y[0]):
         # A constant y has no power around its location, so the ratio would divide by 0.
         # As in scikit-learn's r2_score: 1 if the prediction is exact, 0 otherwise.

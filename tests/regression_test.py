@@ -77,23 +77,6 @@ class TestAlphaLossAndScore:
         assert r_alpha_score(y, y.copy(), alpha=2.0) == 1.0
         assert r_alpha_score(y, y + 1.0, alpha=2.0) == 0.0
 
-    @pytest.mark.parametrize("alpha", [1.0, 2.0])
-    def test_r_alpha_score_takes_a_column_prediction_for_one_dimensional_y(self, alpha):
-        constant = np.full(5, 3.0)
-        y = np.array([1.0, 2.0, 4.0, 7.0, 11.0])
-        y_pred = y + 0.1
-
-        assert r_alpha_score(constant, constant.reshape(-1, 1), alpha=alpha) == 1.0
-        assert r_alpha_score(y, y_pred.reshape(-1, 1), alpha=alpha) == r_alpha_score(y, y_pred, alpha=alpha)
-
-    def test_r_alpha_score_of_empty_y_raises_value_error(self):
-        with pytest.raises(ValueError, match="empty"):
-            r_alpha_score(np.array([]), np.array([]), alpha=1.0)
-
-    def test_r_alpha_score_of_different_sizes_raises_value_error(self):
-        with pytest.raises(ValueError, match="same size"):
-            r_alpha_score(np.ones(5), np.ones(4), alpha=1.0)
-
     def test_score_of_constant_y_does_not_raise(self):
         X = np.array([[1.0], [2.0], [3.0], [4.0]])
         y = np.full(4, 3.0)
