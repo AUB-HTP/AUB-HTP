@@ -1,4 +1,3 @@
-import math
 from functools import lru_cache
 from scipy.optimize import minimize, brentq
 from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf, _isotropic_series_radius
@@ -63,43 +62,54 @@ class _RadialLogPdf:
     def __init__(self, dimensions: int, alpha: float):
         self.dimensions = dimensions
         self.alpha = alpha
-        # exp(-(gamma |t|)^alpha) = exp(-|t|^alpha / alpha)
-        gamma_scale = (1 / alpha) ** (1 / alpha)
+        # exp(-(gamma |t|)^alpha) = exp(-|t|^alpha / alpha), with gamma = (1 / alpha)^(1 / alpha).
+        # The table is built for gamma = 1, over u = r / gamma: f_d(r) = gamma^-d f_d,1(r / gamma).
+        self.log_gamma_scale = -np.log(alpha) / alpha
 
-        # gamma^2 overflows for alpha below about 0.012.
-        radius_join = _isotropic_series_radius(alpha, dimensions, gamma_scale) if gamma_scale < 1e150 else np.inf
-        if not np.isfinite(radius_join):
+        radius_join = _isotropic_series_radius(alpha, dimensions, 1.0)
+        if not np.isfinite(radius_join) or radius_join == 0:
             raise ValueError(
                 f"The isotropic pdf cannot be computed accurately for alpha = {alpha} in {dimensions} dimensions."
             )
-        # f_d(r) = f_d(0) (1 - (r / core)^2 + ...) near 0
-        core = np.sqrt(2 * dimensions) * gamma_scale * np.exp(
-            0.5 * (math.lgamma(dimensions / alpha) - math.lgamma((dimensions + 2) / alpha))
+        # f_d(u) = f_d(0) (1 - (u / core)^2 + ...) near 0
+        log_core = 0.5 * (
+            np.log(2 * dimensions) + special.gammaln(dimensions / alpha) - special.gammaln((dimensions + 2) / alpha)
         )
-        self.log_radius_low = np.log(1e-3 * min(core, radius_join))
-        # The mass beyond r decays like r^-alpha: stop at exp(-50) of it, and at ln(r / 2 gamma) = 100.
-        log_radius_limit = np.log(2 * gamma_scale) + 100.0
+        self.log_radius_low = np.log(1e-3) + min(log_core, np.log(radius_join))
+        # The mass beyond u decays like u^-alpha: stop at exp(-50) of it, and at ln(u / 2) = 100.
+        log_radius_limit = np.log(2) + 100.0
         self.log_radius_high = max(min(np.log(radius_join) + 50 / alpha, log_radius_limit), np.log(radius_join) + 1)
+
+        # Fail before the long build: a very small alpha underflows at the low end.
+        ends = np.exp([self.log_radius_low, self.log_radius_high])
+        if not np.all(np.isfinite(_isotropic_radial_log_pdf(ends, alpha, dimensions, 1.0))):
+            raise ValueError(
+                f"The isotropic pdf cannot be computed accurately for alpha = {alpha} in {dimensions} dimensions."
+            )
 
         # About 60 points per decade.
         n_points = int(26 * (self.log_radius_high - self.log_radius_low)) + 2
         self.log_radius = np.linspace(self.log_radius_low, self.log_radius_high, n_points)
-        # alpha_power needs the pdf to decrease with r.
+        # alpha_power needs the pdf to decrease with u.
         self.log_pdf = np.minimum.accumulate(
-            _isotropic_radial_log_pdf(np.exp(self.log_radius), alpha, dimensions, gamma_scale)
+            _isotropic_radial_log_pdf(np.exp(self.log_radius), alpha, dimensions, 1.0)
         )
         self.interpolator = PchipInterpolator(self.log_radius, self.log_pdf)
         self.entropy = self._entropy()
 
     def __call__(self, radius: np.ndarray) -> np.ndarray:
         with np.errstate(divide="ignore"):
-            log_radius = np.maximum(np.log(radius), self.log_radius_low)
+            log_radius = np.maximum(np.log(radius) - self.log_gamma_scale, self.log_radius_low)
         beyond = np.maximum(log_radius - self.log_radius_high, 0.0)
-        return self.interpolator(log_radius - beyond) - (self.dimensions + self.alpha) * beyond
+        return (
+            self.interpolator(log_radius - beyond)
+            - (self.dimensions + self.alpha) * beyond
+            - self.dimensions * self.log_gamma_scale
+        )
 
     def _entropy(self) -> float:
         """
-        h = -int |S^(d-1)| r^(d-1) f_d(r) ln f_d(r) dr, over s = ln r, with r^(d-1) dr = r^d ds.
+        The entropy h = -int |S^(d-1)| r^(d-1) f_d(r) ln f_d(r) dr, integrated over the table's points.
         """
         d = self.dimensions
         log_area = _log_unit_sphere_area(d)
@@ -110,10 +120,12 @@ class _RadialLogPdf:
         # density is its value at r_high times exp(-alpha (s - s_high)).
         alpha = self.alpha
         outer = mass_density[-1] * (self.log_pdf[-1] / alpha - (d + alpha) / alpha ** 2)
+        # The table is for gamma = 1: the scale adds d ln gamma.
         return float(
             -inner_mass * self.log_pdf[0]
             - simpson(mass_density * self.log_pdf, x=self.log_radius)
             - outer
+            + d * self.log_gamma_scale
         )
 
 
@@ -151,7 +163,7 @@ def _isotropic_log_pdf(radius: np.ndarray, dimensions: int, alpha: float) -> np.
         return -dimensions / 2 * np.log(2 * np.pi) - radius ** 2 / 2
     elif alpha == 1:
         # Cauchy distribution
-        log_coefficient = math.lgamma((dimensions + 1) / 2) - (dimensions + 1) / 2 * np.log(np.pi)
+        log_coefficient = special.gammaln((dimensions + 1) / 2) - (dimensions + 1) / 2 * np.log(np.pi)
         return log_coefficient - (dimensions + 1) / 2 * np.log1p(radius ** 2)
     else:
         return _radial_log_pdf(dimensions, alpha)(radius)

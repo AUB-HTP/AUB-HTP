@@ -890,15 +890,16 @@ def _isotropic_radial_log_mixture(radius, alpha, d, gamma_scale):
     """
     radius = np.atleast_1d(np.asarray(radius, dtype=np.float64))
     log_a, log_weight = _positive_stable_nodes(float(alpha), int(d))
-    base = log_weight - d / 2.0 * (np.log(4.0 * np.pi * gamma_scale ** 2) + log_a)
-    inverse_variance = np.exp(-log_a) / (4.0 * gamma_scale ** 2)
+    base = log_weight - d / 2.0 * (np.log(4.0 * np.pi) + 2.0 * np.log(gamma_scale) + log_a)
+    # 1 / (2 gamma sqrt(A)). Squared after the product with r, so that a tiny r does not underflow.
+    inverse_deviation = np.exp(-0.5 * log_a - np.log(2.0 * gamma_scale))
     out = np.empty_like(radius)
     # About 4e6 values in memory at once.
     rows = max(1, 4_000_000 // log_a.size)
     for start in range(0, radius.size, rows):
         block = radius[start:start + rows]
         out[start:start + rows] = logsumexp(
-            base[None, :] - block[:, None] ** 2 * inverse_variance[None, :],
+            base[None, :] - (block[:, None] * inverse_deviation[None, :]) ** 2,
             axis=1)
     return out
 

@@ -496,11 +496,11 @@ class TestMultivariateIsotropicPdfAndEntropy:
         assert np.all(pdf > 0)
 
     def test_too_small_alpha_raises_value_error(self):
-        """gamma = (1 / alpha)^(1 / alpha) is too large to square."""
+        """The radii of the table underflow."""
         with pytest.raises(ValueError, match="cannot be computed accurately"):
-            isotropic_entropy(2, 0.01)
+            isotropic_entropy(2, 0.005)
         with pytest.raises(ValueError, match="cannot be computed accurately"):
-            isotropic_pdf(np.ones((3, 2)), 0.01)
+            isotropic_pdf(np.ones((3, 2)), 0.005)
 
     @pytest.mark.parametrize(
         ("alpha", "dimensions"), [(0.05, 2), (0.1, 2), (0.1, 5), (0.2, 3), (0.5, 2), (1.5, 3)]
