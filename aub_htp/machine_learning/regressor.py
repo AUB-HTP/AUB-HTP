@@ -7,13 +7,17 @@ from scipy.optimize import minimize
 from ..statistics import alpha_power, alpha_location
 
 
-def l_alpha_loss(y, y_pred, *, alpha: float):
-    # TODO: Document the descrepancy with paper.
-    return alpha_power(y - y_pred, alpha) ** 2 
+def l_alpha_loss(y, y_pred, *, alpha: float, tol: float = 2.0 ** -20, max_iter: int = 100):
+    return alpha_power(y - y_pred, alpha, tol=tol, max_iter=max_iter) ** 2
 
 
 def r_alpha_score(y, y_pred, *, alpha: float) -> float:
-    # TODO: Pending more analysis on this.
+    y = np.asarray(y, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    if np.all(y == y[0]):
+        # A constant y has no power around its location, so the ratio would divide by 0.
+        # As in scikit-learn's r2_score: 1 if the prediction is exact, 0 otherwise.
+        return 1.0 if np.array_equal(y, y_pred) else 0.0
     y_location = np.broadcast_to(alpha_location(y, alpha), y.shape)
     return (1 - l_alpha_loss(y, y_pred, alpha=alpha)
               / l_alpha_loss(y, y_location, alpha=alpha))
@@ -52,12 +56,16 @@ class AlphaStableLinearRegressor(RegressorMixin, BaseEstimator):
         _, n_features = X.shape
         _, n_targets = y.shape
 
+        # The weights are wanted to within tol. Near the minimum, moving the weights by tol
+        # changes the loss by only about tol^2, so the power is computed to tol^2.
+        power_tol = max(float(self.tol) ** 2, 4 * np.finfo(float).eps)
+
         def objective(weights: np.ndarray) -> float:
             weights = np.asarray(weights, dtype=float)
             w = weights[:n_features * n_targets].reshape(n_targets, n_features)
             b = weights[n_features * n_targets:].reshape(n_targets)
             y_pred = X @ w.T + b
-            return l_alpha_loss(y, y_pred, alpha = alpha)
+            return l_alpha_loss(y, y_pred, alpha = alpha, tol = power_tol, max_iter = 100)
 
         weights0 = np.random.randn(n_features * n_targets + n_targets)
         res = minimize(
