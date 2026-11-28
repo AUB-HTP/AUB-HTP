@@ -1,3 +1,4 @@
+import warnings
 from functools import lru_cache
 from scipy.optimize import minimize, brentq
 from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf, _isotropic_series_radius
@@ -11,12 +12,13 @@ import numpy as np
 def _settle_alpha(alpha: float) -> float:
     """Check alpha and return it as a float, set to exactly 1 or 2 when close to them."""
     alpha = float(alpha)
+    # Above 2, only a rounding error is accepted.
+    if not (0 < alpha <= 2 + 1e-8):
+        raise ValueError(f"alpha must be in (0, 2], got {alpha!r}.")
     if np.isclose(alpha, 1):
         return 1.0
     if np.isclose(alpha, 2):
         return 2.0
-    if not (0 < alpha <= 2):
-        raise ValueError(f"alpha must be in (0, 2], got {alpha!r}.")
     return alpha
 
 
@@ -204,7 +206,7 @@ def _entropy_radius(dimensions: int, alpha: float) -> float:
     return (low + high) / 2
 
 
-def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_iter: int = 40) -> float:
+def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_iter: int = 100) -> float:
     """
     The alpha-power P of the data: the root of
 
@@ -215,6 +217,9 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     Binary search over [min_k |x_k| / x_h, max_k |x_k| / x_h], with x_h the radius where
     -ln p = h. It stops when the interval is at most tol times its upper end, or after
     max_iter iterations. tol is relative, so it does not depend on the scale of the data.
+
+    A sample far from the others takes more iterations: about log2(max_k |x_k| / (x_h P))
+    more than -log2(tol). A RuntimeWarning is given if max_iter ends the search before tol.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
     """
@@ -237,10 +242,21 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
         if high - low <= tol * high:
             break
         middle = (low + high) / 2
+        if not (low < middle < high):
+            # No float is left between the ends.
+            break
         if -np.mean(_isotropic_log_pdf(radius / middle, dimensions, alpha)) > entropy:
             low = middle
         else:
             high = middle
+    else:
+        if high - low > tol * high:
+            warnings.warn(
+                f"alpha_power stopped after max_iter = {max_iter} iterations with a relative "
+                f"error of {(high - low) / high:.1e}, above tol = {tol:.1e}. Increase max_iter.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
     return (low + high) / 2
 
 
@@ -249,8 +265,8 @@ def alpha_location(
     alpha: float,
     *,
     tol: float = 2.0 ** -20,
-    power_tol: float = 2.0 ** -20,
-    max_iter: int = 40,
+    power_tol: float | None = None,
+    max_iter: int = 100,
 ) -> np.ndarray:
     """
     The alpha-location of the data: arg min over mu of alpha_power(data - mu).
@@ -261,12 +277,16 @@ def alpha_location(
     tol is the tolerance for mu, relative to the power of the data around its median.
     power_tol and max_iter are passed to alpha_power. The tolerances are relative, so
     they do not depend on the scale of the data.
-    mu cannot be more accurate than about sqrt(power_tol) times the power.
+    mu cannot be more accurate than about sqrt(power_tol) times the power, so power_tol
+    is tol^2 by default.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
     """
     alpha = _settle_alpha(alpha)
     data, data_is_one_dimensional = _validate_data(data)
+    relative_tol = float(np.clip(tol, np.finfo(float).eps, 1.0))
+    if power_tol is None:
+        power_tol = relative_tol ** 2
 
     if alpha == 2:
         location = np.mean(data, axis=0)
@@ -285,7 +305,6 @@ def alpha_location(
             # Powell's tolerances are relative to the scale of the data.
             unit = 1.0
             unit = power(np.zeros_like(start))
-            relative_tol = float(np.clip(tol, np.finfo(float).eps, 1.0))
             offset = minimize(
                 power,
                 x0 = np.zeros_like(start),

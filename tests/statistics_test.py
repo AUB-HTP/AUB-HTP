@@ -337,6 +337,14 @@ class TestInvalidInput:
         with pytest.raises(ValueError, match="alpha"):
             isotropic_entropy(1, alpha)
 
+    @pytest.mark.parametrize("alpha", [2.00001, 2.0 + 1e-6])
+    def test_alpha_slightly_above_two_raises_value_error(self, alpha):
+        """Only a rounding error above 2 is taken as 2."""
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_power(np.array([1.0, 2.0, 3.0]), alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_entropy(1, alpha)
+
     @pytest.mark.parametrize("function", [alpha_power, alpha_location, isotropic_pdf])
     @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
     @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
@@ -656,9 +664,38 @@ class TestAlphaPowerBinarySearch:
         data = isotropic_samples(100, 2, 1.5)
         radius = np.linalg.norm(data, axis=1)
 
-        power = alpha_power(data, 1.5, max_iter=0)
+        with pytest.warns(RuntimeWarning, match="max_iter"):
+            power = alpha_power(data, 1.5, max_iter=0)
 
         assert np.isclose(power, (radius.min() + radius.max()) / 2 / _entropy_radius(2, 1.5))
+
+    @pytest.mark.parametrize("outlier", [1e6, 1e9, 1e12])
+    def test_alpha_power_with_a_far_sample_reaches_tol_at_the_defaults(self, outlier, recwarn):
+        """The search halves an interval as wide as the far sample, so it takes more iterations."""
+        data = np.append(isotropic_samples(2000, 1, 1.0).ravel(), outlier)
+        exact = alpha_power(data, 1.0, tol=1e-14, max_iter=500)
+
+        power = alpha_power(data, 1.0)
+
+        assert abs(power - exact) <= 2.0 ** -20 * exact
+        assert not [warning for warning in recwarn if issubclass(warning.category, RuntimeWarning)]
+
+    def test_alpha_power_warns_when_max_iter_ends_the_search(self):
+        data = np.append(isotropic_samples(2000, 1, 1.0).ravel(), 1e12)
+
+        with pytest.warns(RuntimeWarning, match="max_iter"):
+            alpha_power(data, 1.0, max_iter=30)
+
+    def test_alpha_power_stops_without_warning_when_no_float_is_left(self):
+        """A tol below the rounding error cannot be met."""
+        import warnings
+        data = isotropic_samples(100, 2, 1.5)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            power = alpha_power(data, 1.5, tol=0.0, max_iter=500)
+
+        assert np.isclose(power, alpha_power(data, 1.5, tol=1e-14, max_iter=500), rtol=1e-12)
 
     def test_smaller_tol_is_more_accurate(self):
         data = isotropic_samples(500, 2, 1.5)
@@ -774,11 +811,19 @@ class TestAlphaLocationSearch:
         data = 5.0 + isotropic_samples(500, 1, 1.0, seed=8).ravel()
         exact = alpha_location(data, 1.0, tol=1e-10, power_tol=1e-15, max_iter=100)
 
-        default = alpha_location(data, 1.0)
+        loose = alpha_location(data, 1.0, power_tol=2.0 ** -20)
         tight = alpha_location(data, 1.0, **self.TIGHT)
 
-        assert abs(default - exact) < 1e-2
+        assert abs(loose - exact) < 1e-2
         assert abs(tight - exact) < 1e-5
+
+    def test_default_power_tol_is_the_square_of_tol(self):
+        """mu is good to about sqrt(power_tol) times the power, so the default reaches tol."""
+        data = 5.0 + isotropic_samples(500, 1, 1.0, seed=8).ravel()
+        exact = alpha_location(data, 1.0, tol=1e-10, power_tol=1e-15, max_iter=100)
+
+        assert alpha_location(data, 1.0) == alpha_location(data, 1.0, power_tol=2.0 ** -40)
+        assert abs(alpha_location(data, 1.0) - exact) < 1e-5
 
     def test_deprecated_alpha_location_is_removed(self):
         from aub_htp.statistics import statistics as statistics_module
