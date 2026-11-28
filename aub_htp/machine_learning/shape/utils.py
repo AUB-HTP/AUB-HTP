@@ -1,6 +1,17 @@
 import warnings
 import numpy as np
-from aub_htp.statistics import alpha_power
+from aub_htp.statistics import alpha_location, alpha_power
+
+
+def fit_location_and_power(data: np.ndarray, alpha: float) -> tuple[float, float]:
+    """
+    alpha-location of 1-D data, and the alpha-power of the data centered at it.
+    """
+    power_tol, max_iter = 2.0 ** -40, 100
+    location = float(alpha_location(data, alpha, tol=2.0 ** -20, power_tol=power_tol, max_iter=max_iter))
+    power = alpha_power(data - location, alpha, tol=power_tol, max_iter=max_iter)
+    return location, power
+
 
 def compute_feature_wise_power(data: np.ndarray, alpha: float) -> np.ndarray:
     if data.ndim != 2:

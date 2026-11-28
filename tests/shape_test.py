@@ -18,7 +18,7 @@ METHODS = RATIO_METHODS + ["log-difference", "sheppard", "tyler"]
 PAIRWISE_METHODS = RATIO_METHODS + ["log-difference", "sheppard"]
 ALPHAS = [1.0, 1.5, 2.0]
 RHOS = [-0.9, -0.5, 0.0, 0.5, 0.9]
-SCALES = [1e6]
+SCALES = [1e-6, 1e6]
 
 N_SAMPLES = 4000
 SIGMA = np.array([1.0, 2.0])
@@ -443,10 +443,9 @@ class TestAlphaStableShapeScaling:
 
         sigma, correlation = to_sigma_and_correlation(shape)
         sigma_of_scaled, correlation_of_scaled = to_sigma_and_correlation(shape_of_scaled)
-        assert np.allclose(sigma_of_scaled / scale, sigma, rtol=1e-3, atol=0.0)
-        # alpha_location is only accurate to about 1e-3 sigma, and log-difference is
-        # sensitive to the location through the samples nearest to it.
-        tolerance = 0.1 if method == "log-difference" else 1e-2
+        assert np.allclose(sigma_of_scaled / scale, sigma, rtol=1e-9, atol=0.0)
+        # log-difference is sensitive to the location through the samples nearest to it.
+        tolerance = 1e-3 if method == "log-difference" else 1e-5
         assert np.allclose(correlation_of_scaled, correlation, rtol=0.0, atol=tolerance)
 
     @pytest.mark.parametrize("method", METHODS)
@@ -459,7 +458,7 @@ class TestAlphaStableShapeScaling:
         location = AlphaStableShape(alpha=1.0, method=method).fit(X).location_
         location_of_scaled = AlphaStableShape(alpha=1.0, method=method).fit(scale * X).location_
 
-        assert np.all(np.abs(location_of_scaled / scale - location) < 1e-2 * SIGMA)
+        assert np.all(np.abs(location_of_scaled / scale - location) < 1e-5 * SIGMA)
 
 
 class TestAlphaStableShapeOutput:

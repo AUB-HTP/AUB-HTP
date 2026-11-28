@@ -3,13 +3,11 @@ import numpy as np
 from sklearn.base import BaseEstimator
 from sklearn.utils.validation import validate_data
 
-from aub_htp.statistics import alpha_location, alpha_power
-
 from .ratio import estimate_correlation_ratio
 from .log_difference import estimate_correlation_log_difference
 from .sheppard import estimate_correlation_sheppard
 from .tyler import estimate_correlation_tyler
-from .utils import repair_correlation_matrix
+from .utils import fit_location_and_power, repair_correlation_matrix
 
 MethodLiteral = Literal["ratio-1", "ratio-2", "ratio-3", "log-difference", "sheppard", "tyler"]
 
@@ -73,7 +71,6 @@ class AlphaStableShape(BaseEstimator):
         location = np.empty(n_features, dtype=float)
         small_sigma = np.empty(n_features, dtype=float)
         for feature in range(n_features):
-            x = X[:, feature]
-            location[feature] = alpha_location(x, alpha)
-            small_sigma[feature] = power_to_sigma * alpha_power(x - location[feature], alpha)
+            location[feature], power = fit_location_and_power(X[:, feature], alpha)
+            small_sigma[feature] = power_to_sigma * power
         return location, small_sigma

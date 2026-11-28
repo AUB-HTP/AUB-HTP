@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from scipy.ndimage import shift
 from scipy.stats import alpha, cauchy
-from aub_htp.statistics import alpha_power, alpha_location
+from aub_htp.statistics import alpha_power, alpha_location, isotropic_entropy, isotropic_pdf
 from scipy.stats import multivariate_t
 
 
@@ -270,3 +270,570 @@ class TestDimensionsAndShapes:
         power = alpha_power(data, alpha)
 
         assert np.isscalar(power)
+
+
+class TestAllZeroData:
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("shape", [(10,), (10, 1)])
+    def test_alpha_power_of_all_zero_data_is_zero(self, alpha, shape):
+        """All-zero data has no root in P, so its power is 0."""
+        assert alpha_power(np.zeros(shape), alpha) == 0
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_alpha_power_of_all_zero_multivariate_data_is_zero(self, alpha):
+        assert alpha_power(np.zeros((10, 3)), alpha) == 0
+
+
+class TestAlphaCloseToOneOrTwo:
+
+    # An alpha above 2 raises, however close.
+    CLOSE = [(1.0, -1e-9), (1.0, 1e-9), (2.0, -1e-9)]
+
+    @pytest.mark.parametrize(("alpha", "offset"), CLOSE)
+    def test_isotropic_entropy_takes_the_closed_form_branch(self, alpha, offset):
+        """An alpha close to 1 or 2 gives the same entropy as exactly 1 or 2, in 1-D too."""
+        assert isotropic_entropy(1, alpha + offset) == isotropic_entropy(1, alpha)
+        assert isotropic_entropy(3, alpha + offset) == isotropic_entropy(3, alpha)
+
+    @pytest.mark.parametrize(("alpha", "offset"), CLOSE)
+    def test_isotropic_pdf_takes_the_closed_form_branch(self, alpha, offset):
+        data = np.linspace(-3, 3, 7)
+        assert np.array_equal(isotropic_pdf(data, alpha + offset), isotropic_pdf(data, alpha))
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_alpha_power_accepts_alpha_close_to_one_or_two(self, alpha):
+        data = np.random.default_rng(0).normal(0, 1, 200)
+        assert np.isclose(alpha_power(data, alpha - 1e-9), alpha_power(data, alpha))
+
+    def test_close_alphas_share_one_cache_entry(self):
+        from aub_htp.statistics.statistics import _isotropic_entropy
+        isotropic_entropy(1, 1.0)
+        misses = _isotropic_entropy.cache_info().misses
+        isotropic_entropy(1, 1.0 + 1e-9)
+        isotropic_entropy(1, 1.0 - 1e-9)
+        assert _isotropic_entropy.cache_info().misses == misses
+
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_isotropic_entropy_accepts_zero_dimensional_array_alpha(self, alpha):
+        """A 0-d array is unhashable, so it must be converted before the cache sees it."""
+        assert isotropic_entropy(1, np.array(alpha)) == isotropic_entropy(1, alpha)
+
+    def test_isotropic_entropy_matches_known_values_in_one_dimension(self):
+        assert np.isclose(isotropic_entropy(1, 2), 0.5 * np.log(2 * np.pi * np.e))
+        assert np.isclose(isotropic_entropy(1, 1), np.log(4 * np.pi))
+
+
+class TestInvalidInput:
+
+    @pytest.mark.parametrize("alpha", [0.0, -1.0, 3.0, 2.5, np.nan])
+    def test_invalid_alpha_raises_value_error(self, alpha):
+        data = np.array([1.0, 2.0, 3.0])
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_power(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_location(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_pdf(data, alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_entropy(1, alpha)
+
+    @pytest.mark.parametrize("alpha", [2.00001, 2.0 + 1e-9, np.nextafter(2.0, 3.0)])
+    def test_alpha_slightly_above_two_raises_value_error(self, alpha):
+        """An alpha above 2 is not taken as 2, however close."""
+        with pytest.raises(ValueError, match="alpha"):
+            alpha_power(np.array([1.0, 2.0, 3.0]), alpha)
+        with pytest.raises(ValueError, match="alpha"):
+            isotropic_entropy(1, alpha)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location, isotropic_pdf])
+    @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
+    @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
+    def test_nan_or_infinite_data_raises_value_error(self, function, bad_value, alpha):
+        with pytest.raises(ValueError, match="NaN or infinite"):
+            function(np.array([1.0, bad_value, 3.0]), alpha)
+        with pytest.raises(ValueError, match="NaN or infinite"):
+            function(np.array([[1.0, 2.0], [bad_value, 4.0]]), alpha)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location, isotropic_pdf])
+    @pytest.mark.parametrize("shape", [(0,), (0, 2), (3, 0)])
+    def test_empty_data_raises_value_error(self, function, shape):
+        with pytest.raises(ValueError, match="empty"):
+            function(np.empty(shape), 1.0)
+
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("data", [np.array(1.0), np.ones((2, 2, 2))])
+    def test_data_with_wrong_number_of_dimensions_raises_value_error(self, function, data):
+        with pytest.raises(ValueError, match=r"\(n_samples,\) or \(n_samples, n_features\)"):
+            function(data, 1.0)
+
+
+class TestIsotropicPdfShape:
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_isotropic_pdf_returns_one_value_per_sample_in_one_dimension(self, alpha):
+        data = np.linspace(-3, 3, 7).reshape(-1, 1)
+        assert isotropic_pdf(data, alpha).shape == (7,)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_isotropic_pdf_takes_one_dimensional_data_as_one_feature(self, alpha):
+        data = np.linspace(-3, 3, 7)
+        pdf = isotropic_pdf(data, alpha)
+        assert pdf.shape == (7,)
+        assert np.array_equal(pdf, isotropic_pdf(data.reshape(-1, 1), alpha))
+
+    @pytest.mark.parametrize("alpha", [1.0, 2.0])
+    def test_isotropic_pdf_returns_one_value_per_sample_in_many_dimensions(self, alpha):
+        assert isotropic_pdf(np.ones((7, 3)), alpha).shape == (7,)
+
+    def test_isotropic_pdf_matches_scipy_in_one_dimension(self):
+        from scipy.stats import norm
+        data = np.linspace(-3, 3, 7)
+        assert np.allclose(isotropic_pdf(data, 2.0), norm.pdf(data))
+        assert np.allclose(isotropic_pdf(data, 1.0), cauchy.pdf(data))
+
+    @pytest.mark.parametrize("data", [np.array(1.0), np.ones((2, 2, 2))])
+    def test_isotropic_pdf_with_wrong_number_of_dimensions_raises_value_error(self, data):
+        with pytest.raises(ValueError, match=r"\(n_samples,\) or \(n_samples, n_features\)"):
+            isotropic_pdf(data, 1.0)
+
+
+class TestMultivariateIsotropicPdfAndEntropy:
+    """isotropic_pdf and isotropic_entropy in d >= 2 dimensions for alpha != 1, 2."""
+
+    @staticmethod
+    def points_at_radius(radius, dimensions):
+        data = np.zeros((len(radius), dimensions))
+        data[:, 0] = radius
+        return data
+
+    @pytest.mark.parametrize("alpha", [0.3, 0.5, 0.8, 1.2, 1.5, 1.9])
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_pdf_integrates_to_one(self, alpha, dimensions):
+        """int |S^(d-1)| r^(d-1) f_d(r) dr = 1, integrated over s = ln r."""
+        from scipy.integrate import simpson
+        from scipy.special import gamma
+        # The mass beyond r decays like r^(-alpha).
+        s = np.linspace(-25, 35 / alpha, 40001)
+        pdf = isotropic_pdf(self.points_at_radius(np.exp(s), dimensions), alpha)
+        sphere_area = 2 * np.pi ** (dimensions / 2) / gamma(dimensions / 2)
+
+        assert pdf.shape == s.shape
+        assert np.isclose(simpson(sphere_area * np.exp(dimensions * s) * pdf, x=s), 1, atol=1e-4)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    @pytest.mark.parametrize("dimensions", [2, 3])
+    def test_isotropic_pdf_matches_radial_quadrature(self, alpha, dimensions):
+        from aub_htp.pdf.multivariate import _isotropic_radial_pdf
+        radius = np.concatenate(([0.0], np.geomspace(1e-5, 20, 41)))
+        expected = _isotropic_radial_pdf(radius, alpha, dimensions, (1 / alpha) ** (1 / alpha))
+
+        pdf = isotropic_pdf(self.points_at_radius(radius, dimensions), alpha)
+
+        assert np.allclose(pdf, expected, rtol=1e-4, atol=0)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_isotropic_pdf_depends_only_on_the_norm(self, alpha):
+        rng = np.random.default_rng(0)
+        directions = rng.normal(size=(20, 3))
+        directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+
+        pdf = isotropic_pdf(2.5 * directions, alpha)
+
+        assert np.allclose(pdf, pdf[0], rtol=1e-12)
+
+    @pytest.mark.parametrize("alpha", [0.3, 0.5, 0.8, 1.2, 1.5, 1.9])
+    @pytest.mark.parametrize("dimensions", [2, 5])
+    def test_isotropic_pdf_decreases_with_the_norm(self, alpha, dimensions):
+        """alpha_power relies on this."""
+        radius = np.concatenate(([0.0], np.geomspace(1e-8, 1e8, 2001)))
+
+        pdf = isotropic_pdf(self.points_at_radius(radius, dimensions), alpha)
+
+        assert np.all(pdf > 0)
+        assert np.all(np.diff(pdf) <= 0)
+
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_pdf_is_continuous_in_alpha_at_one_and_two(self, dimensions):
+        data = self.points_at_radius(np.geomspace(1e-3, 50, 30), dimensions)
+
+        assert np.allclose(isotropic_pdf(data, 1 - 1e-4), isotropic_pdf(data, 1), rtol=5e-3)
+        assert np.allclose(isotropic_pdf(data, 1 + 1e-4), isotropic_pdf(data, 1), rtol=5e-3)
+        # The tail of alpha < 2 is a power law, so compare with the normal pdf only in its bulk.
+        bulk = self.points_at_radius(np.geomspace(1e-3, 3, 30), dimensions)
+        assert np.allclose(isotropic_pdf(bulk, 2 - 1e-4), isotropic_pdf(bulk, 2), rtol=5e-3)
+
+    @pytest.mark.parametrize("dimensions", [2, 3, 5])
+    def test_isotropic_entropy_is_continuous_in_alpha_at_one_and_two(self, dimensions):
+        assert np.isclose(isotropic_entropy(dimensions, 1 - 1e-4), isotropic_entropy(dimensions, 1), atol=5e-3)
+        assert np.isclose(isotropic_entropy(dimensions, 1 + 1e-4), isotropic_entropy(dimensions, 1), atol=5e-3)
+        assert np.isclose(isotropic_entropy(dimensions, 2 - 1e-4), isotropic_entropy(dimensions, 2), atol=5e-3)
+
+    @pytest.mark.parametrize("dimensions", [2, 3])
+    def test_isotropic_entropy_decreases_with_alpha(self, dimensions):
+        alphas = [0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0]
+        entropies = [isotropic_entropy(dimensions, alpha) for alpha in alphas]
+
+        assert np.all(np.diff(entropies) < 0)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.5])
+    def test_isotropic_entropy_matches_monte_carlo(self, alpha):
+        """h = E[-ln p(X)], with X = sqrt(A) G for A positive (alpha / 2)-stable and G normal."""
+        from scipy.stats import levy_stable
+        n, dimensions = 200_000, 2
+        rng = np.random.default_rng(0)
+        # X has characteristic function exp(-|t|^alpha / alpha).
+        mixing = levy_stable.rvs(
+            alpha / 2, 1, loc=0, scale=np.cos(np.pi * alpha / 4) ** (2 / alpha), size=n, random_state=rng,
+        )
+        normal = rng.normal(scale=np.sqrt(2) * (1 / alpha) ** (1 / alpha), size=(n, dimensions))
+        samples = np.sqrt(mixing)[:, None] * normal
+
+        negative_log_pdf = -np.log(isotropic_pdf(samples, alpha))
+        standard_error = np.std(negative_log_pdf) / np.sqrt(n)
+
+        assert abs(np.mean(negative_log_pdf) - isotropic_entropy(dimensions, alpha)) < 5 * standard_error
+
+    @pytest.mark.parametrize(("alpha", "dimensions"), [(1.5, 100), (0.5, 100), (0.2, 20), (1.9, 300)])
+    def test_many_dimensions_and_small_alpha_work(self, alpha, dimensions):
+        entropy = isotropic_entropy(dimensions, alpha)
+        pdf = isotropic_pdf(np.ones((3, dimensions)), alpha)
+
+        assert np.isfinite(entropy)
+        # The entropy decreases with alpha, down to the normal one.
+        assert entropy > isotropic_entropy(dimensions, 2)
+        assert np.all(pdf > 0)
+
+    def test_too_small_alpha_raises_value_error(self):
+        """The radii of the table underflow."""
+        with pytest.raises(ValueError, match="cannot be computed accurately"):
+            isotropic_entropy(2, 0.005)
+        with pytest.raises(ValueError, match="cannot be computed accurately"):
+            isotropic_pdf(np.ones((3, 2)), 0.005)
+
+    @pytest.mark.parametrize(
+        ("alpha", "dimensions"), [(0.05, 2), (0.1, 2), (0.1, 5), (0.2, 3), (0.5, 2), (1.5, 3)]
+    )
+    def test_isotropic_entropy_matches_direct_integration(self, alpha, dimensions):
+        """
+        h = -int |S^(d-1)| r^(d-1) f_d ln f_d dr from the exact log pdf, far beyond the table.
+
+        For a small alpha much of the mass is beyond the table, where the entropy uses the power law.
+        """
+        from scipy.integrate import simpson
+        from scipy.special import gammaln
+        from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf
+        gamma_scale = (1 / alpha) ** (1 / alpha)
+        # Not beyond ln r = 700, where r overflows.
+        s = np.linspace(-45, min(np.log(2 * gamma_scale) + 60 / alpha, 700.0), 8001)
+        log_pdf = _isotropic_radial_log_pdf(np.exp(s), alpha, dimensions, gamma_scale)
+        log_sphere_area = np.log(2) + dimensions / 2 * np.log(np.pi) - gammaln(dimensions / 2)
+        mass_density = np.exp(log_sphere_area + dimensions * s + log_pdf)
+
+        assert np.isclose(simpson(mass_density, x=s), 1, atol=1e-6)
+        assert np.isclose(isotropic_entropy(dimensions, alpha), -simpson(mass_density * log_pdf, x=s), rtol=1e-4)
+
+
+def isotropic_samples(n, dimensions, alpha, seed=0):
+    """Samples of the isotropic alpha-stable law with characteristic function exp(-|t|^alpha / alpha)."""
+    from scipy.stats import levy_stable
+    rng = np.random.default_rng(seed)
+    if alpha == 2:
+        return rng.normal(size=(n, dimensions))
+    # X = sqrt(A) G for A positive (alpha / 2)-stable and G normal.
+    mixing = levy_stable.rvs(
+        alpha / 2, 1, loc=0, scale=np.cos(np.pi * alpha / 4) ** (2 / alpha), size=n, random_state=rng,
+    )
+    normal = rng.normal(scale=np.sqrt(2) * (1 / alpha) ** (1 / alpha), size=(n, dimensions))
+    return np.sqrt(mixing)[:, None] * normal
+
+
+class TestAlphaPowerBinarySearch:
+
+    @staticmethod
+    def residual(data, power, alpha):
+        """g(P) = -mean ln p(x / P) - h"""
+        data = np.asarray(data, dtype=float).reshape(len(data), -1)
+        return -np.mean(np.log(isotropic_pdf(data / power, alpha))) - isotropic_entropy(data.shape[1], alpha)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_alpha_power_is_the_root(self, alpha, dimensions):
+        data = 3.0 * isotropic_samples(500, dimensions, alpha)
+
+        power = alpha_power(data, alpha)
+
+        assert abs(self.residual(data, power, alpha)) < 1e-4
+        # g decreases with P.
+        assert self.residual(data, 0.9 * power, alpha) > 0 > self.residual(data, 1.1 * power, alpha)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("dimensions", [1, 2, 5])
+    def test_alpha_power_recovers_the_scale(self, alpha, dimensions):
+        """The power of c X is c for X the isotropic law itself."""
+        data = 7.0 * isotropic_samples(20_000, dimensions, alpha)
+
+        assert np.isclose(alpha_power(data, alpha), 7.0, rtol=0.05)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-6, 1e-3, 1e3, 1e6])
+    def test_alpha_power_scales_with_the_data(self, alpha, scale):
+        """P(c X) = c P(X) at any scale, with the same tol."""
+        data = isotropic_samples(300, 2, alpha)
+
+        power = alpha_power(data, alpha, tol=1e-9)
+        scaled_power = alpha_power(scale * data, alpha, tol=1e-9)
+
+        assert np.isclose(scaled_power, scale * power, rtol=1e-6)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-9, 1e-6, 1e-3, 1e3, 1e6])
+    def test_alpha_power_scales_with_the_data_at_the_default_tol(self, alpha, scale):
+        data = isotropic_samples(300, 2, alpha)
+
+        assert np.isclose(alpha_power(scale * data, alpha), scale * alpha_power(data, alpha), rtol=1e-5)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_does_not_depend_on_the_starting_scale(self, alpha):
+        """Powell started from P = 1 whatever the data's scale."""
+        data = 1e5 * isotropic_samples(2000, 1, alpha)
+
+        assert np.isclose(alpha_power(data, alpha), 1e5, rtol=0.1)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_is_in_the_bracket(self, alpha):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(50, 2, alpha)
+        radius = np.linalg.norm(data, axis=1)
+        entropy_radius = _entropy_radius(2, float(alpha))
+
+        power = alpha_power(data, alpha)
+
+        assert radius.min() / entropy_radius <= power <= radius.max() / entropy_radius
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_entropy_radius_is_where_negative_log_pdf_is_the_entropy(self, alpha, dimensions):
+        from aub_htp.statistics.statistics import _entropy_radius
+        entropy_radius = _entropy_radius(dimensions, float(alpha))
+        point = np.zeros((1, dimensions))
+        point[0, 0] = entropy_radius
+
+        assert entropy_radius > 0
+        assert np.isclose(-np.log(isotropic_pdf(point, alpha))[0], isotropic_entropy(dimensions, alpha), atol=1e-6)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 3])
+    def test_alpha_power_of_one_sample_is_its_norm_over_the_entropy_radius(self, alpha, dimensions):
+        """Then a = b, and g(a) = -ln p(x_h) - h = 0."""
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = np.full((1, dimensions), 2.0)
+
+        power = alpha_power(data, alpha)
+
+        assert np.isclose(power, np.linalg.norm(data) / _entropy_radius(dimensions, float(alpha)))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_power_with_a_zero_sample(self, alpha):
+        """Then a = 0, where g is not defined. The search never evaluates g there."""
+        data = np.vstack([np.zeros((1, 2)), isotropic_samples(200, 2, alpha)])
+
+        power = alpha_power(data, alpha)
+
+        assert np.isfinite(power) and power > 0
+        assert abs(self.residual(data, power, alpha)) < 1e-4
+
+    def test_entropy_radius_is_cached_on_the_settled_alpha(self):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(100, 1, 1.0)
+        alpha_power(data, 1.0)
+        misses = _entropy_radius.cache_info().misses
+
+        alpha_power(data, 1.0 + 1e-9)
+        alpha_power(data, np.array(1.0 - 1e-9))
+
+        assert _entropy_radius.cache_info().misses == misses
+
+    def test_tol_and_max_iter_are_keyword_only(self):
+        data = isotropic_samples(100, 1, 1.5)
+
+        with pytest.raises(TypeError):
+            alpha_power(data, 1.5, 1e-3)
+
+    def test_max_iter_zero_returns_the_middle_of_the_bracket(self):
+        from aub_htp.statistics.statistics import _entropy_radius
+        data = isotropic_samples(100, 2, 1.5)
+        radius = np.linalg.norm(data, axis=1)
+
+        with pytest.warns(RuntimeWarning, match="max_iter"):
+            power = alpha_power(data, 1.5, max_iter=0)
+
+        assert np.isclose(power, (radius.min() + radius.max()) / 2 / _entropy_radius(2, 1.5))
+
+    @pytest.mark.parametrize("outlier", [1e6, 1e9, 1e12])
+    def test_alpha_power_with_a_far_sample_reaches_tol_at_the_defaults(self, outlier, recwarn):
+        """The search halves an interval as wide as the far sample, so it takes more iterations."""
+        data = np.append(isotropic_samples(2000, 1, 1.0).ravel(), outlier)
+        exact = alpha_power(data, 1.0, tol=1e-14, max_iter=500)
+
+        power = alpha_power(data, 1.0)
+
+        assert abs(power - exact) <= 2.0 ** -20 * exact
+        assert not [warning for warning in recwarn if issubclass(warning.category, RuntimeWarning)]
+
+    def test_alpha_power_warns_when_max_iter_ends_the_search(self):
+        data = np.append(isotropic_samples(2000, 1, 1.0).ravel(), 1e12)
+
+        with pytest.warns(RuntimeWarning, match="max_iter"):
+            alpha_power(data, 1.0, max_iter=30)
+
+    def test_alpha_power_stops_without_warning_when_no_float_is_left(self):
+        """A tol below the rounding error cannot be met."""
+        import warnings
+        data = isotropic_samples(100, 2, 1.5)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            power = alpha_power(data, 1.5, tol=0.0, max_iter=500)
+
+        assert np.isclose(power, alpha_power(data, 1.5, tol=1e-14, max_iter=500), rtol=1e-12)
+
+    def test_smaller_tol_is_more_accurate(self):
+        data = isotropic_samples(500, 2, 1.5)
+        exact = alpha_power(data, 1.5, tol=1e-12, max_iter=200)
+
+        loose = alpha_power(data, 1.5, tol=1e-1, max_iter=200)
+        tight = alpha_power(data, 1.5, tol=1e-6, max_iter=200)
+
+        assert abs(loose - exact) <= 1e-1 * exact
+        assert abs(tight - exact) <= 1e-6 * exact
+
+    def test_alpha_two_is_the_root_mean_square(self):
+        data = isotropic_samples(1000, 3, 2.0)
+
+        assert alpha_power(data, 2.0) == np.sqrt(np.mean(np.sum(data ** 2, axis=1)) / 3)
+        assert alpha_power(data, 2.0 - 1e-9) == alpha_power(data, 2.0)
+
+
+class TestAlphaLocationSearch:
+
+    # The location is good to about sqrt(power_tol) times the power.
+    TIGHT = {"tol": 1e-8, "power_tol": 1e-14, "max_iter": 100}
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    def test_alpha_location_recovers_the_center(self, alpha, dimensions):
+        center = np.array([12.0, -9.0, 4.0])[:dimensions]
+        data = center + 2.0 * isotropic_samples(4000, dimensions, alpha, seed=1)
+
+        location = alpha_location(data, alpha)
+
+        assert np.allclose(location, center, atol=0.3)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    def test_alpha_location_minimizes_the_power(self, alpha, dimensions):
+        data = 5.0 + isotropic_samples(500, dimensions, alpha, seed=2)
+        tolerances = {"tol": self.TIGHT["power_tol"], "max_iter": 100}
+
+        location = np.atleast_1d(alpha_location(data, alpha, **self.TIGHT))
+        power = alpha_power(data - location, alpha, **tolerances)
+
+        for feature in range(dimensions):
+            for step in (-1e-2, 1e-2):
+                moved = location.copy()
+                moved[feature] += step
+                assert alpha_power(data - moved, alpha, **tolerances) > power
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_location_is_translation_equivariant(self, alpha):
+        data = isotropic_samples(500, 2, alpha, seed=3)
+        shift = np.array([200.0, -150.0])
+
+        location = alpha_location(data, alpha, **self.TIGHT)
+        shifted_location = alpha_location(data + shift, alpha, **self.TIGHT)
+
+        assert np.allclose(shifted_location, location + shift, atol=1e-5)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-6, 1e6])
+    def test_alpha_location_scales_with_the_data(self, alpha, scale):
+        """L(c X) = c L(X) at any scale, with the same tolerances."""
+        data = 3.0 + isotropic_samples(500, 1, alpha, seed=4).ravel()
+
+        location = alpha_location(data, alpha, **self.TIGHT)
+        scaled_location = alpha_location(scale * data, alpha, **self.TIGHT)
+
+        assert np.isclose(scaled_location / scale, location, atol=1e-5)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    def test_alpha_location_is_in_the_box_of_the_data(self, alpha):
+        data = isotropic_samples(30, 3, alpha, seed=5)
+
+        location = alpha_location(data, alpha)
+
+        assert np.all(location >= data.min(axis=0)) and np.all(location <= data.max(axis=0))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    def test_constant_feature_gets_its_value(self, alpha):
+        data = isotropic_samples(200, 3, alpha, seed=6)
+        data[:, 1] = 7.25
+
+        location = alpha_location(data, alpha)
+
+        assert location[1] == 7.25
+        assert np.all(np.isfinite(location))
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5, 2.0])
+    @pytest.mark.parametrize("n_samples", [1, 5])
+    def test_constant_data_returns_that_point_without_searching(self, alpha, n_samples, monkeypatch):
+        from aub_htp.statistics import statistics as statistics_module
+
+        def fail(*args, **kwargs):
+            raise AssertionError("Powell should not be called")
+
+        monkeypatch.setattr(statistics_module, "minimize", fail)
+        point = np.array([1.5, -2.0])
+
+        assert np.array_equal(alpha_location(np.tile(point, (n_samples, 1)), alpha), point)
+        assert alpha_location(np.full(n_samples, 3.0), alpha) == 3.0
+
+    def test_alpha_two_is_the_mean(self):
+        data = isotropic_samples(300, 3, 2.0, seed=7) + 4.0
+
+        assert np.array_equal(alpha_location(data, 2.0), data.mean(axis=0))
+        assert np.array_equal(alpha_location(data, 2.0 - 1e-9), data.mean(axis=0))
+
+    def test_tolerances_are_keyword_only(self):
+        with pytest.raises(TypeError):
+            alpha_location(np.array([1.0, 2.0, 3.0]), 1.0, 1e-3)
+
+    def test_smaller_power_tol_is_more_accurate(self):
+        data = 5.0 + isotropic_samples(500, 1, 1.0, seed=8).ravel()
+        exact = alpha_location(data, 1.0, tol=1e-10, power_tol=1e-15, max_iter=100)
+
+        loose = alpha_location(data, 1.0, power_tol=2.0 ** -20)
+        tight = alpha_location(data, 1.0, **self.TIGHT)
+
+        assert abs(loose - exact) < 1e-2
+        assert abs(tight - exact) < 1e-5
+
+    def test_default_power_tol_is_the_square_of_tol(self):
+        """mu is good to about sqrt(power_tol) times the power, so the default reaches tol."""
+        data = 5.0 + isotropic_samples(500, 1, 1.0, seed=8).ravel()
+        exact = alpha_location(data, 1.0, tol=1e-10, power_tol=1e-15, max_iter=100)
+
+        assert alpha_location(data, 1.0) == alpha_location(data, 1.0, power_tol=2.0 ** -40)
+        assert abs(alpha_location(data, 1.0) - exact) < 1e-5
+
+    def test_deprecated_alpha_location_is_removed(self):
+        from aub_htp.statistics import statistics as statistics_module
+
+        assert not hasattr(statistics_module, "deprecated_alpha_location")
+
+
+def test_statistics_all_lists_the_public_functions():
+    import aub_htp.statistics
+    assert set(aub_htp.statistics.__all__) == {
+        "alpha_power", "alpha_location", "isotropic_pdf", "isotropic_entropy",
+    }
