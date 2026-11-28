@@ -1,11 +1,10 @@
 import warnings
 from functools import lru_cache
-from scipy.optimize import minimize, brentq
+from scipy.optimize import minimize
 from aub_htp.pdf.multivariate import _isotropic_radial_log_pdf, _isotropic_series_radius
 from scipy import special
 from scipy.integrate import simpson
 from scipy.interpolate import PchipInterpolator
-from scipy.stats import levy_stable
 import numpy as np
 
 
@@ -44,6 +43,8 @@ def _log_unit_sphere_area(dimensions: int) -> float:
     ln |S^(d-1)|, the log of the area of the unit sphere in d dimensions.
 
         |S^(d-1)| = 2^(n + 1) pi^floor(d / 2) / ((d - 2) (d - 4) ...)
+
+    with n the number of factors (d - 2), (d - 4), ... that are positive.
     """
     denominator_factors = np.arange(dimensions - 2, 0, -2)
     return float(
@@ -140,9 +141,6 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
     Isotropic PDF for alpha-stable distribution, one value per sample.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
-
-    Note for maintainers: This function uses the excplicit formulas for the Cauchy and Normal distributions for alpha = 1 and 2.
-    This is for better performance.
     """
     alpha = _settle_alpha(alpha)
     data, _ = _validate_data(data)
