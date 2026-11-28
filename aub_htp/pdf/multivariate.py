@@ -856,13 +856,18 @@ def _positive_stable_nodes(alpha, d):
 
         A = sin(a U) / sin(U)^(1 / a) * (sin((1 - a) U) / E)^((1 - a) / a)
 
-    The nodes are a Gauss--Legendre grid over ``U`` and ``ln E``, finer and
-    wider over ``ln E`` in many dimensions.
+    Two Gauss--Legendre grids: over ``s``, with ``U = pi (1 - exp(-s))``, and
+    over ``ln E``, finer and wider in many dimensions. The nodes cluster at
+    ``U = pi``, where ``A`` is large for ``alpha`` near 2.
     """
     a = alpha / 2.0
-    x_u, w_u = np.polynomial.legendre.leggauss(200)
-    u = 0.5 * np.pi * (x_u + 1.0)
-    w_u = 0.5 * w_u  # du / pi
+    x_s, w_s = np.polynomial.legendre.leggauss(200)
+    # Beyond s = 45, U is closer to pi than any A that matters needs.
+    s = 0.5 * 45.0 * (x_s + 1.0)
+    u = np.pi * -np.expm1(-s)
+    # sin(U) = sin(pi - U), which does not lose digits near pi.
+    sin_u = np.sin(np.pi * np.exp(-s))
+    w_u = 0.5 * 45.0 * w_s * np.exp(-s)  # du / pi
     peak = 1.0 + d / 2.0 * (1.0 - a) / a
     # In ln E the mass has width 1 / sqrt(peak).
     x_t, w_t = np.polynomial.legendre.leggauss(
@@ -872,7 +877,7 @@ def _positive_stable_nodes(alpha, d):
     t = low + 0.5 * (high - low) * (x_t + 1.0)
     w_t = 0.5 * (high - low) * w_t
     u, t = np.meshgrid(u, t, indexing="ij")
-    log_a = (np.log(np.sin(a * u)) - np.log(np.sin(u)) / a
+    log_a = (np.log(np.sin(a * u)) - np.log(sin_u)[:, None] / a
              + (1.0 - a) / a * (np.log(np.sin((1.0 - a) * u)) - t))
     # dE = E d(ln E)
     log_weight = np.log(w_u)[:, None] + np.log(w_t)[None, :] - np.exp(t) + t

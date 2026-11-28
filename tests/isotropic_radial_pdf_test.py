@@ -96,6 +96,17 @@ class TestLargeRadius:
         slopes = np.diff(np.log(pdf)) / np.diff(np.log(radius))
         assert np.allclose(slopes, slopes[0], rtol=0.2)
 
+    @pytest.mark.parametrize("alpha", [1.95, 1.99, 1.999, 1.9999])
+    @pytest.mark.parametrize("d", [1, 2, 3])
+    def test_mixture_matches_the_series_for_alpha_close_to_two(self, alpha, d):
+        """Past the normal core the density is all tail, which comes from a large A."""
+        radius = _isotropic_series_radius(alpha, d, 1.0) * np.array([1.0, 1.1, 1.3])
+
+        log_mixture = _isotropic_radial_log_mixture(radius, alpha, d, 1.0)
+        log_series, _ = _isotropic_radial_log_series(radius, alpha, d, 1.0)
+
+        assert np.allclose(log_mixture, log_series, rtol=0, atol=1e-7)
+
     def test_scale(self):
         """f(r; gamma) = f(r / gamma; 1) / gamma^d"""
         radius = np.geomspace(1e-3, 1e6, 40)
