@@ -12,8 +12,7 @@ import numpy as np
 def _settle_alpha(alpha: float) -> float:
     """Check alpha and return it as a float, set to exactly 1 or 2 when close to them."""
     alpha = float(alpha)
-    # Above 2, only a rounding error is accepted.
-    if not (0 < alpha <= 2 + 1e-8):
+    if not (0 < alpha <= 2):
         raise ValueError(f"alpha must be in (0, 2], got {alpha!r}.")
     if np.isclose(alpha, 1):
         return 1.0

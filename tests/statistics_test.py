@@ -287,15 +287,16 @@ class TestAllZeroData:
 
 class TestAlphaCloseToOneOrTwo:
 
-    @pytest.mark.parametrize("alpha", [1.0, 2.0])
-    @pytest.mark.parametrize("offset", [-1e-9, 1e-9])
+    # An alpha above 2 raises, however close.
+    CLOSE = [(1.0, -1e-9), (1.0, 1e-9), (2.0, -1e-9)]
+
+    @pytest.mark.parametrize(("alpha", "offset"), CLOSE)
     def test_isotropic_entropy_takes_the_closed_form_branch(self, alpha, offset):
         """An alpha close to 1 or 2 gives the same entropy as exactly 1 or 2, in 1-D too."""
         assert isotropic_entropy(1, alpha + offset) == isotropic_entropy(1, alpha)
         assert isotropic_entropy(3, alpha + offset) == isotropic_entropy(3, alpha)
 
-    @pytest.mark.parametrize("alpha", [1.0, 2.0])
-    @pytest.mark.parametrize("offset", [-1e-9, 1e-9])
+    @pytest.mark.parametrize(("alpha", "offset"), CLOSE)
     def test_isotropic_pdf_takes_the_closed_form_branch(self, alpha, offset):
         data = np.linspace(-3, 3, 7)
         assert np.array_equal(isotropic_pdf(data, alpha + offset), isotropic_pdf(data, alpha))
@@ -303,7 +304,7 @@ class TestAlphaCloseToOneOrTwo:
     @pytest.mark.parametrize("alpha", [1.0, 2.0])
     def test_alpha_power_accepts_alpha_close_to_one_or_two(self, alpha):
         data = np.random.default_rng(0).normal(0, 1, 200)
-        assert np.isclose(alpha_power(data, alpha + 1e-9), alpha_power(data, alpha))
+        assert np.isclose(alpha_power(data, alpha - 1e-9), alpha_power(data, alpha))
 
     def test_close_alphas_share_one_cache_entry(self):
         from aub_htp.statistics.statistics import _isotropic_entropy
@@ -337,9 +338,9 @@ class TestInvalidInput:
         with pytest.raises(ValueError, match="alpha"):
             isotropic_entropy(1, alpha)
 
-    @pytest.mark.parametrize("alpha", [2.00001, 2.0 + 1e-6])
+    @pytest.mark.parametrize("alpha", [2.00001, 2.0 + 1e-9, np.nextafter(2.0, 3.0)])
     def test_alpha_slightly_above_two_raises_value_error(self, alpha):
-        """Only a rounding error above 2 is taken as 2."""
+        """An alpha above 2 is not taken as 2, however close."""
         with pytest.raises(ValueError, match="alpha"):
             alpha_power(np.array([1.0, 2.0, 3.0]), alpha)
         with pytest.raises(ValueError, match="alpha"):
