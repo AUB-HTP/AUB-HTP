@@ -129,7 +129,7 @@ class _RadialLogPdf:
         )
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=32)
 def _radial_log_pdf(dimensions: int, alpha: float) -> _RadialLogPdf:
     return _RadialLogPdf(dimensions, alpha)
 
@@ -144,14 +144,7 @@ def isotropic_pdf(data: np.ndarray, alpha: float) -> np.ndarray:
     This is for better performance.
     """
     alpha = _settle_alpha(alpha)
-    data = np.asarray(data, dtype=float)
-    if data.ndim == 1:
-        data = data.reshape(-1, 1)
-    if data.ndim != 2:
-        raise ValueError(
-            "data must have shape (n_samples,) or (n_samples, n_features), "
-            f"got {data.ndim}D data of shape {data.shape}."
-        )
+    data, _ = _validate_data(data)
     _, dimensions = data.shape
     return np.exp(_isotropic_log_pdf(np.linalg.norm(data, axis=1), dimensions, alpha))
 
@@ -220,8 +213,8 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     for p the isotropic pdf and h its entropy.
 
     Binary search over [min_k |x_k| / x_h, max_k |x_k| / x_h], with x_h the radius where
-    -ln p = h. It stops when the interval is at most tol, or after max_iter iterations.
-    tol is absolute, so it should fit the scale of the data.
+    -ln p = h. It stops when the interval is at most tol times its upper end, or after
+    max_iter iterations. tol is relative, so it does not depend on the scale of the data.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
     """
@@ -241,7 +234,7 @@ def alpha_power(data: np.ndarray, alpha: float, *, tol: float = 2.0 ** -20, max_
     entropy_radius = _entropy_radius(dimensions, alpha)
     low, high = float(radius.min() / entropy_radius), float(radius.max() / entropy_radius)
     for _ in range(max_iter):
-        if high - low <= tol:
+        if high - low <= tol * high:
             break
         middle = (low + high) / 2
         if -np.mean(_isotropic_log_pdf(radius / middle, dimensions, alpha)) > entropy:
@@ -265,9 +258,10 @@ def alpha_location(
     Powell search in the box of the data, starting from the median. A constant feature
     gets its value. For alpha = 2 the location is the mean.
 
-    tol is the tolerance for mu. power_tol and max_iter are passed to alpha_power.
-    The tolerances are absolute, so they should fit the scale of the data.
-    mu cannot be more accurate than about sqrt(power_tol * power).
+    tol is the tolerance for mu, relative to the power of the data around its median.
+    power_tol and max_iter are passed to alpha_power. The tolerances are relative, so
+    they do not depend on the scale of the data.
+    mu cannot be more accurate than about sqrt(power_tol) times the power.
 
     data has shape (n_samples,) for one feature, or (n_samples, n_features).
     """
@@ -291,7 +285,7 @@ def alpha_location(
             # Powell's tolerances are relative to the scale of the data.
             unit = 1.0
             unit = power(np.zeros_like(start))
-            relative_tol = float(np.clip(tol / unit, np.finfo(float).eps, 1.0))
+            relative_tol = float(np.clip(tol, np.finfo(float).eps, 1.0))
             offset = minimize(
                 power,
                 x0 = np.zeros_like(start),

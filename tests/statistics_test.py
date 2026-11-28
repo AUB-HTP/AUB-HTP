@@ -337,7 +337,7 @@ class TestInvalidInput:
         with pytest.raises(ValueError, match="alpha"):
             isotropic_entropy(1, alpha)
 
-    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location, isotropic_pdf])
     @pytest.mark.parametrize("bad_value", [np.nan, np.inf, -np.inf])
     @pytest.mark.parametrize("alpha", [1.0, 1.5, 2.0])
     def test_nan_or_infinite_data_raises_value_error(self, function, bad_value, alpha):
@@ -346,7 +346,7 @@ class TestInvalidInput:
         with pytest.raises(ValueError, match="NaN or infinite"):
             function(np.array([[1.0, 2.0], [bad_value, 4.0]]), alpha)
 
-    @pytest.mark.parametrize("function", [alpha_power, alpha_location])
+    @pytest.mark.parametrize("function", [alpha_power, alpha_location, isotropic_pdf])
     @pytest.mark.parametrize("shape", [(0,), (0, 2), (3, 0)])
     def test_empty_data_raises_value_error(self, function, shape):
         with pytest.raises(ValueError, match="empty"):
@@ -569,13 +569,20 @@ class TestAlphaPowerBinarySearch:
     @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
     @pytest.mark.parametrize("scale", [1e-6, 1e-3, 1e3, 1e6])
     def test_alpha_power_scales_with_the_data(self, alpha, scale):
-        """P(c X) = c P(X) at any scale, with tol set to the scale of the data."""
+        """P(c X) = c P(X) at any scale, with the same tol."""
         data = isotropic_samples(300, 2, alpha)
 
         power = alpha_power(data, alpha, tol=1e-9)
-        scaled_power = alpha_power(scale * data, alpha, tol=1e-9 * scale)
+        scaled_power = alpha_power(scale * data, alpha, tol=1e-9)
 
         assert np.isclose(scaled_power, scale * power, rtol=1e-6)
+
+    @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
+    @pytest.mark.parametrize("scale", [1e-9, 1e-6, 1e-3, 1e3, 1e6])
+    def test_alpha_power_scales_with_the_data_at_the_default_tol(self, alpha, scale):
+        data = isotropic_samples(300, 2, alpha)
+
+        assert np.isclose(alpha_power(scale * data, alpha), scale * alpha_power(data, alpha), rtol=1e-5)
 
     @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
     def test_alpha_power_does_not_depend_on_the_starting_scale(self, alpha):
@@ -660,8 +667,8 @@ class TestAlphaPowerBinarySearch:
         loose = alpha_power(data, 1.5, tol=1e-1, max_iter=200)
         tight = alpha_power(data, 1.5, tol=1e-6, max_iter=200)
 
-        assert abs(loose - exact) <= 1e-1
-        assert abs(tight - exact) <= 1e-6
+        assert abs(loose - exact) <= 1e-1 * exact
+        assert abs(tight - exact) <= 1e-6 * exact
 
     def test_alpha_two_is_the_root_mean_square(self):
         data = isotropic_samples(1000, 3, 2.0)
@@ -672,7 +679,7 @@ class TestAlphaPowerBinarySearch:
 
 class TestAlphaLocationSearch:
 
-    # Tolerances for data of scale about 1: the location is good to about sqrt(power_tol).
+    # The location is good to about sqrt(power_tol) times the power.
     TIGHT = {"tol": 1e-8, "power_tol": 1e-14, "max_iter": 100}
 
     @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
@@ -713,12 +720,11 @@ class TestAlphaLocationSearch:
     @pytest.mark.parametrize("alpha", [0.5, 1.0, 1.5])
     @pytest.mark.parametrize("scale", [1e-6, 1e6])
     def test_alpha_location_scales_with_the_data(self, alpha, scale):
-        """L(c X) = c L(X) at any scale, with the tolerances set to the scale of the data."""
+        """L(c X) = c L(X) at any scale, with the same tolerances."""
         data = 3.0 + isotropic_samples(500, 1, alpha, seed=4).ravel()
-        scaled_tolerances = {"tol": 1e-8 * scale, "power_tol": 1e-14 * scale, "max_iter": 100}
 
         location = alpha_location(data, alpha, **self.TIGHT)
-        scaled_location = alpha_location(scale * data, alpha, **scaled_tolerances)
+        scaled_location = alpha_location(scale * data, alpha, **self.TIGHT)
 
         assert np.isclose(scaled_location / scale, location, atol=1e-5)
 

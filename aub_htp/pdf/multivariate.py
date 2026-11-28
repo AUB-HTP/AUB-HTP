@@ -826,7 +826,7 @@ def _isotropic_radial_log_series(radius, alpha, d, gamma_scale, *, terms=200):
     return log_pdf, np.where(total > 0.0, relative_error, np.inf)
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=128)
 def _isotropic_series_radius(alpha, d, gamma_scale):
     """Smallest radius from which the series in ``1 / r`` is accurate to 1e-10.
 
